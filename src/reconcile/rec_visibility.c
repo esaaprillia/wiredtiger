@@ -1180,16 +1180,6 @@ __rec_fill_tw_from_upd_select(WT_SESSION_IMPL *session, WT_PAGE *page, WT_CELL_U
     else if (select_tw->stop_ts != WT_TS_NONE || select_tw->stop_txn != WT_TXN_NONE) {
         WT_ASSERT_ALWAYS(
           session, tombstone != NULL, "The only contents of the update list is a single tombstone");
-
-        /*
-         * The fixed-length column-store implicitly fills the gap with empty records of single
-         * tombstones. We are done with update selection if there is no on-disk entry.
-         */
-        if (vpack == NULL && S2BT(session)->type == BTREE_COL_FIX) {
-            upd_select->upd = tombstone;
-            return (0);
-        }
-
         WT_ASSERT_ALWAYS(
           session, vpack != NULL && vpack->type != WT_CELL_DEL, "No on-disk value is found");
 
