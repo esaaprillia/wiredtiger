@@ -1433,7 +1433,7 @@ __wti_rec_upd_select(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_INSERT *ins,
      */
     if (ins != NULL)
         first_upd = ins->upd;
-    else {
+    else { // Here rip should not be null
         /* Note: ins is never null for columns. */
         WT_ASSERT(session, rip != NULL && page->type == WT_PAGE_ROW_LEAF);
         if ((first_upd = WT_ROW_UPDATE(page, rip)) == NULL)

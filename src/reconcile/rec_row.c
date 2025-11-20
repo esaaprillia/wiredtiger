@@ -905,7 +905,7 @@ __rec_row_leaf_insert(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_INSERT *ins
     /* Temporary buffer in which to instantiate any uninstantiated keys or value items we need. */
     WT_RET(__wt_scr_alloc(session, 0, &tmpkey));
 
-    for (; ins != NULL; ins = WT_SKIP_NEXT(ins)) {
+    for (; ins != NULL; ins = WT_SKIP_NEXT(ins)) { /* enumerate the 0th level skip list */
         WT_ERR(__wti_rec_upd_select(session, r, ins, NULL, NULL, &upd_select));
         if ((upd = upd_select.upd) == NULL) {
             /*
@@ -1098,7 +1098,7 @@ __wti_rec_row_leaf(
 
     /*
      * Write any K/V pairs inserted into the page before the first from-disk key on the page.
-     */
+     */ /* Get the 1st inserted key chain */
     if ((ins = WT_SKIP_FIRST(WT_ROW_INSERT_SMALLEST(page))) != NULL)
         WT_RET(__rec_row_leaf_insert(session, r, ins));
 

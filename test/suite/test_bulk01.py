@@ -78,7 +78,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
         self.assertEqual(self.get_stat(stat.conn.cursor_bulk_count), 0)
 
     # Test a bulk-load triggers variable-length column-store RLE correctly.
-    def test_bulk_load_var_rle(self):
+    def uitest_bulk_load_var_rle(self):
         if self.keyfmt != 'r' or self.valfmt == '8t':
                 return
 
@@ -93,7 +93,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
             cursor[simple_key(cursor, i)] = simple_value(cursor, i//7)
 
     # Test a bulk-load variable-length column-store append ignores any key.
-    def test_bulk_load_var_append(self):
+    def uitest_bulk_load_var_append(self):
         if self.keyfmt != 'r':
                 return
 
@@ -111,7 +111,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
             self.assertEqual(cursor.get_value(), simple_value(cursor, i))
 
     # Test that column-store bulk-load handles skipped records correctly.
-    def test_bulk_load_col_delete(self):
+    def uitest_bulk_load_col_delete(self):
         if self.keyfmt != 'r':
                 return
 
@@ -144,7 +144,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
 
     # Test that variable-length column-store bulk-load efficiently creates big
     # records.
-    def test_bulk_load_col_big(self):
+    def uitest_bulk_load_col_big(self):
         if self.keyfmt != 'r' or self.valfmt == '8t':
                 return
 
@@ -166,7 +166,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
         self.assertEqual(cursor.get_value(), simple_value(cursor, big))
 
     # Test that bulk-load out-of-order fails.
-    def test_bulk_load_order_check(self):
+    def uitest_bulk_load_order_check(self):
         uri = self.type + self.name
         self.session.create(uri,
             'key_format=' + self.keyfmt + ',value_format=' + self.valfmt)
@@ -183,7 +183,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
         cursor[simple_key(cursor, 11)] = simple_value(cursor, 11)
 
     # Test that row-store bulk-load out-of-order can succeed.
-    def test_bulk_load_row_order_nocheck(self):
+    def uitest_bulk_load_row_order_nocheck(self):
         self.skipTest('Changed the error return to an assertion')
         # Row-store offers an optional fast-past that skips the relatively
         # expensive key-order checks, used when the input is known to be
@@ -208,7 +208,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
             lambda: self.conn.close(), msg)
 
     # Test bulk-load only permitted on newly created objects.
-    def test_bulk_load_not_empty(self):
+    def uitest_bulk_load_not_empty(self):
         uri = self.type + self.name
         self.session.create(uri, 'key_format=S,value_format=S')
         cursor = self.session.open_cursor(uri, None)

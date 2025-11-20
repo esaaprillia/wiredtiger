@@ -2616,7 +2616,7 @@ __rec_split_write(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WTI_REC_CHUNK *chu
     multi->supd_restore = false;
 
     /* Set the key. */
-    if (btree->type == BTREE_ROW)
+    if (btree->type == BTREE_ROW) /* Copy the first key of a chunk/diskblock/page */
         WT_RET(__wt_row_ikey_alloc(session, 0, chunk->key.data, chunk->key.size, &multi->key.ikey));
     else
         multi->key.recno = chunk->recno;

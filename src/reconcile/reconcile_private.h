@@ -277,8 +277,8 @@ struct __wti_reconcile {
      * pointers to stack locations around the code.
      */
     uint64_t recno;         /* Current record number */
-    uint32_t entries;       /* Current number of entries */
-    uint8_t *first_free;    /* Current first free byte */
+    uint32_t entries;       /* Current number of entries within one page, key/val will +2 */
+    uint8_t *first_free;    /* Current first free byte within one page-> r->cur_ptr->image.mem */
     size_t space_avail;     /* Remaining space in this chunk */
     size_t min_space_avail; /* Remaining space in this chunk to put a minimum size boundary */
 
