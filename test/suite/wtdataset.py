@@ -122,7 +122,7 @@ class BaseDataSet(object):
         elif key_format == 'u':
             return bytes(('%015d' % i).encode())
         elif key_format == 'S':
-            return str('%015d' % i)
+            return str('%0128d' % i)
         else:
             raise AssertionError(
                 'key: object has unexpected format: ' + key_format)

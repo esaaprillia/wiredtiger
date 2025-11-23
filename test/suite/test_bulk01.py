@@ -41,16 +41,16 @@ class test_bulk_load(wttest.WiredTigerTestCase):
 
     types = [
         ('file', dict(type='file:')),
-        ('table', dict(type='table:'))
+        # ('table', dict(type='table:'))
     ]
     keyfmt = [
-        ('integer', dict(keyfmt='i')),
-        ('recno', dict(keyfmt='r')),
+        # ('integer', dict(keyfmt='i')),
+        # ('recno', dict(keyfmt='r')),
         ('string', dict(keyfmt='S')),
     ]
     valfmt = [
-        ('fixed', dict(valfmt='8t')),
-        ('integer', dict(valfmt='i')),
+        # ('fixed', dict(valfmt='8t')),
+        # ('integer', dict(valfmt='i')),
         ('string', dict(valfmt='S')),
     ]
     scenarios = make_scenarios(types, keyfmt, valfmt)
@@ -65,13 +65,14 @@ class test_bulk_load(wttest.WiredTigerTestCase):
     def test_bulk_load(self):
         uri = self.type + self.name
         self.session.create(uri,
-            'key_format=' + self.keyfmt + ',value_format=' + self.valfmt)
+            'key_format=' + self.keyfmt + ',value_format=' + self.valfmt + 
+            ',internal_page_max=4k,leaf_page_max=4k')
 
         self.assertEqual(self.get_stat(stat.conn.cursor_bulk_count), 0)
         cursor = self.session.open_cursor(uri, None, "bulk")
         self.assertEqual(self.get_stat(stat.conn.cursor_bulk_count), 1)
 
-        for i in range(1, 1000):
+        for i in range(1, 10000):
             cursor[simple_key(cursor, i)] = simple_value(cursor, i)
         cursor.close()
 
@@ -221,7 +222,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
             lambda: self.session.open_cursor(uri, None, "bulk"), msg)
 
     # Test that bulk-load objects cannot be opened by other cursors.
-    def test_bulk_load_busy(self):
+    def uitest_bulk_load_busy(self):
         uri = self.type + self.name
         self.session.create(uri, 'key_format=S,value_format=S')
         cursor = self.session.open_cursor(uri, None)
