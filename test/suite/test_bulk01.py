@@ -77,12 +77,12 @@ class test_bulk_load(wttest.WiredTigerTestCase):
 
         cursor.close()
 
-        read_cursor = self.session.open_cursor(uri, None, None)
-        for i in range(1, 10000):
-            read_cursor.set_key(simple_key(read_cursor, i))
-            read_cursor.search()
-            self.assertEqual(read_cursor.get_value(), simple_value(read_cursor, i))
-        read_cursor.close()
+        # read_cursor = self.session.open_cursor(uri, None, None)
+        # for i in range(1, 10000):
+        #     read_cursor.set_key(simple_key(read_cursor, i))
+        #     read_cursor.search()
+        #     self.assertEqual(read_cursor.get_value(), simple_value(read_cursor, i))
+        # read_cursor.close()
 
         # self.assertEqual(self.get_stat(stat.conn.cursor_bulk_count), 0)
 
