@@ -145,9 +145,6 @@ class test_bulk_load(wttest.WiredTigerTestCase):
             if i % 7 == 0:
                 cursor.search()
                 self.assertEqual(cursor.get_value(), simple_value(cursor, i))
-            elif cursor.value_format == '8t':
-                cursor.search()
-                self.assertEqual(cursor.get_value(), 0)
             else:
                 self.assertEqual(cursor.search(), wiredtiger.WT_NOTFOUND)
 

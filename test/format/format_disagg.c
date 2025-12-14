@@ -83,6 +83,7 @@ disagg_setup_multi_node(void)
         return;
 
     testutil_snprintf(follower_home, sizeof(follower_home), "%s/follower", g.home);
+    memset(&g.checkpoint_metadata, 0, sizeof(g.checkpoint_metadata));
 
     /*
      * Create required dir before forking to avoid parent/child races. Skip on reopen, since the run
@@ -143,21 +144,30 @@ disagg_is_mode_switch(void)
  * disagg_switch_roles --
  *     Toggle the current disagg role between "leader" and "follower",
  */
-int
+void
 disagg_switch_roles(void)
 {
-    char disagg_cfg[64];
-
+    /* Perform step-up or step-down. */
     g.disagg_leader = !g.disagg_leader;
+
     /*
      * FIXME-WT-15763: WT does not yet support graceful step-downs. Simply reconfiguring WT to step
      * down may cause issues, so we reopen the connection when switching to follower mode.
      */
-    if (!g.disagg_leader)
+    if (!g.disagg_leader) {
+        /*
+         * Stepping down: [leader -> follower]. As part of reopening WT, we will reconfigure the
+         * database as a follower based on the value of g.disagg_leader.
+         */
+        track("[role change] leader -> follower", 0ULL);
         wts_reopen();
+        follower_read_latest_checkpoint();
+    } else {
+        /* Stepping up: [follower -> leader] */
+        track("[role change] follower -> leader", 0ULL);
+        testutil_check(g.wts_conn->reconfigure(g.wts_conn, "disaggregated=(role=leader)"));
+    }
 
-    testutil_snprintf(disagg_cfg, sizeof(disagg_cfg), "disaggregated=(role=\"%s\")",
-      g.disagg_leader ? "leader" : "follower");
-
-    return (g.wts_conn->reconfigure(g.wts_conn, disagg_cfg));
+    /* After every switch, verify the contents of each table */
+    wts_verify_mirrors(g.wts_conn, NULL, NULL);
 }
