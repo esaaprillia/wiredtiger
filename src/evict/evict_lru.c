@@ -326,8 +326,12 @@ __evict_thread_run(WT_SESSION_IMPL *session, WT_THREAD *thread)
          * set the flag on both sessions because we may call clear_walk when we are walking with the
          * walk session, locked.
          */
-        FLD_SET(session->lock_flags, WT_SESSION_LOCKED_PASS);
-        FLD_SET(evict->walk_session->lock_flags, WT_SESSION_LOCKED_PASS);
+        FLD_SET(
+          session->lock_flags, WT_SESSION_LOCKED_PASS); /* The session is for the eviction
+                                                           management itself,e.g.,everytime there is
+                                                           only one eviction server thread */
+        FLD_SET(evict->walk_session->lock_flags,
+          WT_SESSION_LOCKED_PASS); /* The walk session is for the work of queueing pages */
         ret = __evict_server(session, &did_work);
         FLD_CLR(evict->walk_session->lock_flags, WT_SESSION_LOCKED_PASS);
         FLD_CLR(session->lock_flags, WT_SESSION_LOCKED_PASS);
