@@ -1766,11 +1766,20 @@ __evict_walk(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue)
     total_candidates = (u_int)(F_ISSET(evict, WT_EVICT_CACHE_CLEAN | WT_EVICT_CACHE_UPDATES) ?
         __wt_cache_pages_inuse(cache) :
         __wt_atomic_load_uint64_relaxed(&cache->pages_dirty_leaf));
-    max_entries = WT_MIN(max_entries, 1 + total_candidates / 2);
+
+    /* The naming of the max_entries is misleading, it actually represents the farthest
+        position the queue can be filled this walk starting from slot, so actually the
+        maximum number of pages that can be filled is max_entries - slot.
+        When last walk get bigger slot, it's more unlikely to be able to queue this walk.
+        e.g. : last walk, slot = 300, total_candidates = 500, 
+        max_entries = 1 + 500 / 2 = 251, so we can only queue 251 - 300 = -49 pages.
+        This is a bug, so we cap max_entries to avoid negative numbers.
+        and slot = 300 > 251, the following loop wil not hit. */
+    max_entries = WT_MIN(max_entries, 1 + total_candidates / 2); 
 
 retry:
     loop_count = 0;
-    while (slot < max_entries && loop_count++ < conn->dhandle_count) {
+    while (slot < max_entries && loop_count++ < conn->dhandle_count) { /* This will not hit as the above mentioned */
         /* We're done if shutting down or reconfiguring. */
         if (F_ISSET_ATOMIC_32(conn, WT_CONN_CLOSING))
             break;
@@ -2192,7 +2201,7 @@ __evict_skip_dirty_candidate(WT_SESSION_IMPL *session, WT_PAGE *page)
 
 /*
  * __evict_get_target_pages --
- *     Calculate the target pages to add to the queue.
+ *     Calculate theoritically the maximum number of target pages to add to the queue.
  */
 static WT_INLINE uint32_t
 __evict_get_target_pages(WT_SESSION_IMPL *session, u_int max_entries, uint32_t slot)
@@ -2217,8 +2226,8 @@ __evict_get_target_pages(WT_SESSION_IMPL *session, u_int max_entries, uint32_t s
     target_pages = __evict_walk_target(session);
 
     if ((target_pages == 0) || btree->evict_walk_progress >= btree->evict_walk_target) {
-        btree->evict_walk_target = target_pages;
-        btree->evict_walk_progress = 0;
+        btree->evict_walk_target = target_pages; /* the target pages should be queued */
+        btree->evict_walk_progress = 0;          /* the number pages already queued */
     }
     target_pages = btree->evict_walk_target - btree->evict_walk_progress;
 
@@ -2597,7 +2606,8 @@ fast:
 
 /*
  * __evict_walk_tree --
- *     Get a few page eviction candidates from a single underlying file.
+ *     Get a few page eviction candidates from a single underlying file. slotp : when input, its the
+ *     starting slot to fill in the queue; when output, it's the number of slots filled.
  */
 static int
 __evict_walk_tree(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue, u_int max_entries, u_int *slotp)

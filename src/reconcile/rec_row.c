@@ -1079,7 +1079,8 @@ __wti_rec_row_leaf(
 
     /*
      * Write any K/V pairs inserted into the page before the first from-disk key on the page.
-     */ /* Get the 1st inserted key chain */
+     */ 
+    /* Get the 1st inserted key chain */
     if ((ins = WT_SKIP_FIRST(WT_ROW_INSERT_SMALLEST(page))) != NULL)
         WT_RET(__rec_row_leaf_insert(session, r, ins));
 
