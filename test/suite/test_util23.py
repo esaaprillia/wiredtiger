@@ -25,7 +25,29 @@
 # OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
-import wttest
 
-class test_prepare_preserve_prepare_base(wttest.WiredTigerTestCase):
-    conn_config = 'precise_checkpoint=true,preserve_prepared=true,statistics=(all)'
+import wttest
+from suite_subprocess import suite_subprocess
+
+# test_util23.py
+# Test that wt verify properly handles scratch buffers on usage path.
+class test_util23(wttest.WiredTigerTestCase, suite_subprocess):
+    tablename = 'test_util23.wt'
+    uri = 'file:' + tablename
+
+    commands = ["-r", "verify", "-d", "dump_offsets", uri]
+
+    def test_verify_scratch_buffer(self):
+        create_params = 'key_format=S,value_format=S'
+        self.session.create(self.uri, create_params)
+
+        self.runWt(self.commands,
+                   errfilename="errfile.txt",
+                   failure=True)
+
+        self.check_file_contains("errfile.txt", 'usage:')
+        with open("errfile.txt", 'r') as f:
+            content = f.read()
+            # Ensure that we no longer see the following error.
+            self.assertNotIn('scratch buffer allocated and never discarded', content)
+
