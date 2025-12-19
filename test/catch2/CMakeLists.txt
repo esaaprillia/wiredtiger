@@ -25,6 +25,7 @@ else()
         block/api/test_block_api_write.cpp
         block/unit/test_bitstring.cpp
         block/unit/test_block_addr.cpp
+        block/unit/test_block_bitflip.cpp
         block/unit/test_block_ckpt.cpp
         block/unit/test_block_file.cpp
         block/unit/test_block_other.cpp
@@ -38,7 +39,6 @@ else()
         cursors/api/test_bulk_cursor.cpp
         cursors/unit/test_bounds_restore.cpp
         cursors/unit/test_cursor_get_raw_key_value.cpp
-        ext/test_key_provider.cpp
         sub_level_error/api/test_sub_level_error_session_get_last_error.cpp
         sub_level_error/api/test_sub_level_error_strerror.cpp
         sub_level_error/unit/test_sub_level_error_api_end.cpp
@@ -101,11 +101,6 @@ create_test_executable(catch2-unittests
     LIBS
         Catch2::Catch2
     CXX
-)
-
-target_compile_definitions(catch2-unittests
-    PRIVATE
-        KEY_PROVIDER_EXTENSION="$<TARGET_FILE:wiredtiger_key_provider>"
 )
 
 if(WT_POSIX)
