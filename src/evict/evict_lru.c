@@ -1457,9 +1457,9 @@ __evict_lru_walk(WT_SESSION_IMPL *session)
         --evict->evict_empty_score;
 
     /* Fill the next queue (that isn't the urgent queue). */
-    queue = evict->evict_fill_queue;
+    queue = evict->evict_fill_queue; //Set the current to the next queue to fill
     other_queue = evict->evict_queues + (1 - (queue - evict->evict_queues));
-    evict->evict_fill_queue = other_queue;
+    evict->evict_fill_queue = other_queue; //Set the next to the other queue
 
     /* If this queue is full, try the other one. */
     if (__evict_queue_full(queue) && !__evict_queue_full(other_queue))
@@ -1467,11 +1467,13 @@ __evict_lru_walk(WT_SESSION_IMPL *session)
 
     /*
      * If both queues are full and haven't been empty on recent refills, we're done.
+     * What if queue is full while evict->evict_empty_score >= WT_EVICT_SCORE_CUTOFF?
      */
     if (__evict_queue_full(queue) && evict->evict_empty_score < WT_EVICT_SCORE_CUTOFF) {
         WT_STAT_CONN_INCR(session, eviction_queue_not_empty);
         goto err;
     }
+
     /*
      * If the queue we are filling is empty, pages are being requested faster than they are being
      * queued.
