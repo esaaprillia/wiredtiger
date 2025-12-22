@@ -1459,11 +1459,11 @@ __evict_lru_walk(WT_SESSION_IMPL *session)
     /* Fill the next queue (that isn't the urgent queue). */
     queue = evict->evict_fill_queue; //Set the current to the next queue to fill
     other_queue = evict->evict_queues + (1 - (queue - evict->evict_queues));
-    evict->evict_fill_queue = other_queue; //Set the next to the other queue
+    evict->evict_fill_queue = other_queue; //Set the next fill queue to the other queue
 
     /* If this queue is full, try the other one. */
     if (__evict_queue_full(queue) && !__evict_queue_full(other_queue))
-        queue = other_queue;
+        queue = other_queue; /* Select the unempty queue */
 
     /*
      * If both queues are full and haven't been empty on recent refills, we're done.
