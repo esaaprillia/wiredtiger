@@ -899,6 +899,7 @@ inmemory
 inserters
 instantiation
 interruptible
+intialized
 intl
 intnum
 intpack
@@ -1481,6 +1482,7 @@ writelock
 writeunlock
 wrlock
 wrlsn
+wtch
 wthread
 wti
 wtobj

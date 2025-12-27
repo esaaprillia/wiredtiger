@@ -1045,8 +1045,9 @@ err:
 /*
  * __txn_resolve_prepared_update_chain --
  *     Helper for resolving updates. Recursively visit the update chain and resolve the updates on
- *     the way back out, so older updates are resolved first; this avoids a race with reconciliation
- *     (see WT-6778).
+ *     the way back out, so older updates are resolved first. This ensures that a reconciliation
+ *     racing with us will always see the newest update from the prepared transaction if any updates
+ *     are still unresolved.
  */
 static void
 __txn_resolve_prepared_update_chain(WT_SESSION_IMPL *session, WT_UPDATE *upd, bool commit)
@@ -1582,7 +1583,7 @@ __wt_txn_commit(WT_SESSION_IMPL *session, const char *cfg[])
                  * Switch reserved operations to abort to simplify obsolete update list truncation.
                  */
                 if (upd->type == WT_UPDATE_RESERVE) {
-                    upd->txnid = WT_TXN_ABORTED;
+                    __wt_tsan_suppress_store_uint64_v(&upd->txnid, WT_TXN_ABORTED);
                     break;
                 }
 
@@ -1791,7 +1792,7 @@ __wt_txn_commit(WT_SESSION_IMPL *session, const char *cfg[])
     update_durable_ts = false;
     prev_durable_timestamp = WT_TS_NONE;
     if (candidate_durable_timestamp != WT_TS_NONE) {
-        prev_durable_timestamp = txn_global->durable_timestamp;
+        prev_durable_timestamp = __wt_tsan_suppress_load_uint64(&txn_global->durable_timestamp);
         update_durable_ts = candidate_durable_timestamp > prev_durable_timestamp;
     }
 
@@ -1803,10 +1804,10 @@ __wt_txn_commit(WT_SESSION_IMPL *session, const char *cfg[])
         while (candidate_durable_timestamp > prev_durable_timestamp) {
             if (__wt_atomic_cas_uint64(&txn_global->durable_timestamp, prev_durable_timestamp,
                   candidate_durable_timestamp)) {
-                txn_global->has_durable_timestamp = true;
+                __wt_tsan_suppress_store_bool(&txn_global->has_durable_timestamp, true);
                 break;
             }
-            prev_durable_timestamp = txn_global->durable_timestamp;
+            prev_durable_timestamp = __wt_tsan_suppress_load_uint64(&txn_global->durable_timestamp);
         }
 
     /*
@@ -2095,7 +2096,7 @@ __wt_txn_rollback(WT_SESSION_IMPL *session, const char *cfg[], bool api_call)
                   op->btree->id == S2C(session)->cache->hs_fileid)
                     break;
                 WT_ASSERT(session, upd->txnid == txn->id || upd->txnid == WT_TXN_ABORTED);
-                upd->txnid = WT_TXN_ABORTED;
+                __wt_tsan_suppress_store_uint64_v(&upd->txnid, WT_TXN_ABORTED);
             } else {
                 /*
                  * If an operation has the key repeated flag set, skip resolving prepared updates as
@@ -2600,7 +2601,7 @@ __wt_txn_is_blocking(WT_SESSION_IMPL *session)
 
 #ifndef WT_STANDALONE_BUILD
     /*
-     * FIXME: SERVER-44870
+     * FIXME-WT-15823
      *
      * MongoDB can't (yet) handle rolling back read only transactions. For this reason, don't check
      * unless there's at least one update or we're configured to time out thread operations (a way

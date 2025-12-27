@@ -47,7 +47,9 @@
 #define WT_DISAGG_METADATA_MAIN_PAGE_ID 1                        /* Page ID for the main metadata */
 #define WT_DISAGG_METADATA_MAX_PAGE_ID 1                         /* Max page ID in the metadata */
 
-#define WT_DISAGG_KEY_PROVIDER_TABLE_ID 2 /* Table ID for key encryption keys */
+#define WT_DISAGG_KEY_PROVIDER_TABLE_ID 2     /* Table ID for encryption key data */
+#define WT_DISAGG_KEY_PROVIDER_MAIN_PAGE_ID 1 /* Page ID for the main key provider table */
+#define WT_DISAGG_KEY_PROVIDER_MAX_PAGE_ID 1  /* Max page ID in the key provider table */
 
 #define WT_SYSTEM_PREFIX "system:"                               /* System URI prefix */
 #define WT_SYSTEM_CKPT_TS "checkpoint_timestamp"                 /* Checkpoint timestamp name */
@@ -132,3 +134,13 @@ struct __wt_blkincr {
                               /* AUTOMATIC FLAG VALUE GENERATION STOP 8 */
     uint8_t flags;
 };
+
+/*
+ * Metadata configs extracted from the shared main metadata table.
+ */
+typedef enum {
+    CHECKPOINT_CONFIG = 0,
+    TIMESTAMP_CONFIG,
+    KEY_PROVIDER_CONFIG,
+    MAX_NUM_CONFIG
+} WTI_SHARED_MAIN_CFG;

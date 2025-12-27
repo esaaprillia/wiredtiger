@@ -2285,24 +2285,24 @@ struct __wt_connection {
      * Only a part of application threads will participate in cache management when a cache
      * threshold reaches its trigger limit., a boolean flag; default \c false.}
      * @config{&nbsp;&nbsp;&nbsp;&nbsp;legacy_page_visit_strategy, Use legacy page visit strategy
-     * for eviction.  Using this option is highly discouraged as it will re-introduce the bug
-     * described in WT-9121., a boolean flag; default \c false.}
+     * for eviction.  Using this option is highly discouraged as it will re-introduce a bug where
+     * eviction can fail to find older cache content., a boolean flag; default \c false.}
+     * @config{&nbsp;&nbsp;&nbsp;&nbsp;prefer_scrub_eviction, Change the eviction strategy to scrub
+     * eviction when the cache usage is under half way between the target limit to the trigger
+     * limit., a boolean flag; default \c false.}
      * @config{&nbsp;&nbsp;&nbsp;&nbsp;
-     * prefer_scrub_eviction, Change the eviction strategy to scrub eviction when the cache usage is
-     * under half way between the target limit to the trigger limit., a boolean flag; default \c
-     * false.}
-     * @config{&nbsp;&nbsp;&nbsp;&nbsp;skip_update_obsolete_check, Skip checking for
-     * obsolete updates whenever an update operation is performed., a boolean flag; default \c
-     * false.}
-     * @config{&nbsp;&nbsp;&nbsp;&nbsp;threads_max, maximum number of threads WiredTiger
-     * will start to help evict pages from cache.  The number of threads started will vary depending
-     * on the current eviction load.  Each eviction worker thread uses a session from the configured
-     * session_max., an integer between \c 1 and \c 64; default \c 8.}
-     * @config{&nbsp;&nbsp;&nbsp;&nbsp;threads_min, minimum number of threads WiredTiger will start
-     * to help evict pages from cache.  The number of threads currently running will vary depending
-     * on the current eviction load., an integer between \c 1 and \c 64; default \c 1.}
-     * @config{
-     * ),,}
+     * skip_update_obsolete_check, Skip checking for obsolete updates whenever an update operation
+     * is performed., a boolean flag; default \c false.}
+     * @config{&nbsp;&nbsp;&nbsp;&nbsp;
+     * threads_max, maximum number of threads WiredTiger will start to help evict pages from cache.
+     * The number of threads started will vary depending on the current eviction load.  Each
+     * eviction worker thread uses a session from the configured session_max., an integer between \c
+     * 1 and \c 64; default \c 8.}
+     * @config{&nbsp;&nbsp;&nbsp;&nbsp;threads_min, minimum number of
+     * threads WiredTiger will start to help evict pages from cache.  The number of threads
+     * currently running will vary depending on the current eviction load., an integer between \c 1
+     * and \c 64; default \c 1.}
+     * @config{ ),,}
      * @config{eviction_checkpoint_target, perform eviction at the beginning of checkpoints to bring
      * the dirty content in cache to this level.  It is a percentage of the cache size if the value
      * is within the range of 0 to 100 or an absolute size when greater than 100. The value is not
@@ -2955,8 +2955,6 @@ struct __wt_connection {
      * module. The application must first implement the WT_KEY_PROVIDER
      * interface and then register the implementation with WiredTiger:
      *
-     * @snippet ex_key_provider.c WT_KEY_PROVIDER register
-     *
      * @param connection the connection handle
      * @param km the key provider structure
      * @configempty{WT_CONNECTION.set_key_provider, see dist/api_data.py}
@@ -3225,21 +3223,22 @@ struct __wt_connection {
  * incremental_app_eviction, Only a part of application threads will participate in cache management
  * when a cache threshold reaches its trigger limit., a boolean flag; default \c false.}
  * @config{&nbsp;&nbsp;&nbsp;&nbsp;legacy_page_visit_strategy, Use legacy page visit strategy for
- * eviction.  Using this option is highly discouraged as it will re-introduce the bug described in
- * WT-9121., a boolean flag; default \c false.}
+ * eviction.  Using this option is highly discouraged as it will re-introduce a bug where eviction
+ * can fail to find older cache content., a boolean flag; default \c false.}
+ * @config{&nbsp;&nbsp;&nbsp;&nbsp;prefer_scrub_eviction, Change the eviction strategy to scrub
+ * eviction when the cache usage is under half way between the target limit to the trigger limit., a
+ * boolean flag; default \c false.}
+ * @config{&nbsp;&nbsp;&nbsp;&nbsp;skip_update_obsolete_check, Skip
+ * checking for obsolete updates whenever an update operation is performed., a boolean flag; default
+ * \c false.}
+ * @config{&nbsp;&nbsp;&nbsp;&nbsp;threads_max, maximum number of threads WiredTiger will
+ * start to help evict pages from cache.  The number of threads started will vary depending on the
+ * current eviction load.  Each eviction worker thread uses a session from the configured
+ * session_max., an integer between \c 1 and \c 64; default \c 8.}
  * @config{&nbsp;&nbsp;&nbsp;&nbsp;
- * prefer_scrub_eviction, Change the eviction strategy to scrub eviction when the cache usage is
- * under half way between the target limit to the trigger limit., a boolean flag; default \c false.}
- * @config{&nbsp;&nbsp;&nbsp;&nbsp;skip_update_obsolete_check, Skip checking for obsolete updates
- * whenever an update operation is performed., a boolean flag; default \c false.}
- * @config{&nbsp;&nbsp;&nbsp;&nbsp;threads_max, maximum number of threads WiredTiger will start to
- * help evict pages from cache.  The number of threads started will vary depending on the current
- * eviction load.  Each eviction worker thread uses a session from the configured session_max., an
- * integer between \c 1 and \c 64; default \c 8.}
- * @config{&nbsp;&nbsp;&nbsp;&nbsp;threads_min,
- * minimum number of threads WiredTiger will start to help evict pages from cache.  The number of
- * threads currently running will vary depending on the current eviction load., an integer between
- * \c 1 and \c 64; default \c 1.}
+ * threads_min, minimum number of threads WiredTiger will start to help evict pages from cache.  The
+ * number of threads currently running will vary depending on the current eviction load., an integer
+ * between \c 1 and \c 64; default \c 1.}
  * @config{ ),,}
  * @config{eviction_checkpoint_target, perform eviction at the beginning of checkpoints to bring the
  * dirty content in cache to this level.  It is a percentage of the cache size if the value is
@@ -5743,8 +5742,6 @@ struct __wt_crypt_keys {
  * Interface for custom key provider services used by applications.
  *
  * Applications register implementations using WT_CONNECTION::set_key_provider.
- *
- * @snippet ex_key_provider.c WT_KEY_PROVIDER register
  */
 struct __wt_key_provider {
     /*!
@@ -5769,6 +5766,11 @@ struct __wt_key_provider {
      * When the key has changed, WiredTiger will allocate the required memory and call this
      * function again to fetch the new key. The extension should copy the new key into the
      * WT_CRYPT_KEYS::keys::data field up to WT_CRYPT_KEYS::keys::size.
+     *
+     * Important: Key provider implementations should ensure that the keys are stable between
+     * calls within the same checkpoint. Once WiredTiger calls this function for a key size,
+     * it expects the same key to be returned when called again to retrieve key data.
+     * In other words, keys should not change between calls within the same checkpoint.
      *
      * @param kp the WT_KEY_PROVIDER instance.
      * @param session the current WiredTiger session.
