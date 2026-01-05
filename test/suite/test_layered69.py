@@ -31,40 +31,24 @@ from helper_disagg import disagg_test_class, gen_disagg_storages
 from prepare_util import test_prepare_preserve_prepare_base
 from wtscenario import make_scenarios
 
-# Test reconciliation with prepared rollback. Ensure the old value is included
-# in the write after the prepared update is rolled back.
+# Test building deltas with prepared rollback. Ensure the old value is included
+# in the delta after the prepared update is rolled back.
 @disagg_test_class
 class test_layered69(test_prepare_preserve_prepare_base):
-    conn_config_base = test_prepare_preserve_prepare_base.conn_config + ',disaggregated=(role="leader")'
+    conn_config = test_prepare_preserve_prepare_base.conn_config + ',disaggregated=(role="leader"),'
 
-    uri = "table:test_layered69"
+    uri = "table:test_layered68"
 
     evict = [
         ('none', dict(evict=False)),
         ('evict', dict(evict=True)),
     ]
 
-    delta = [
-        ('disabled', dict(delta=False)),
-        ('enabled', dict(evict=True)),
-    ]
-
     disagg_storages = gen_disagg_storages('test_layered69', disagg_only = True)
-    scenarios = make_scenarios(disagg_storages, evict, delta)
-
-    def conn_config(self):
-        if self.delta:
-            return self.conn_config_base
-        else:
-            return self.conn_config_base + ',page_delta=(internal_page_delta=false,leaf_page_delta=false)'
+    scenarios = make_scenarios(disagg_storages, evict)
 
     def test_rollback_prepared_update(self):
-        if self.delta:
-            stat = wiredtiger.stat.dsrc.rec_page_delta_leaf
-        else:
-            stat = wiredtiger.stat.dsrc.rec_page_full_image_leaf
-
-        # Setup: Initialize the stable timestamp
+        # Setup: Initialize stable timestamp
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(20)}')
 
         create_params = 'key_format=i,value_format=S,type=layered'
@@ -85,7 +69,7 @@ class test_layered69(test_prepare_preserve_prepare_base):
         # Verify checkpoint writes no prepared to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: not self.delta,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: False,
         }, self.uri)
 
         if self.evict:
@@ -110,43 +94,38 @@ class test_layered69(test_prepare_preserve_prepare_base):
 
         # Rollback the prepared transaction
         session_prepare.rollback_transaction(f'rollback_timestamp={self.timestamp_str(45)}')
-        session_prepare.close()
 
-        # Verify checkpoint skips writing a page to disk
+        # Verify checkpoint writes an empty delta to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: False,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: False,
         }, self.uri)
 
         # Make stable timestamp equal to prepare timestamp - this should allow checkpoint to reconcile prepared update
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(35)}')
 
-        # Verify checkpoint writes a page with prepared time window to disk
+        # Verify checkpoint writes a delta with prepared time window to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: True,
-            stat: True,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: True,
         }, self.uri)
 
         # Make stable timestamp equal to rollback timestamp
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(45)}')
 
-        # Verify checkpoint writes a page with the committed update to disk
+        # Verify checkpoint writes a delta with the committed update to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: True,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: True,
         }, self.uri)
 
         # Verify the key
         self.assertEqual(cursor[19], 'commit_value')
 
     def test_rollback_prepared_reinsert(self):
-        if self.delta:
-            stat = wiredtiger.stat.dsrc.rec_page_delta_leaf
-        else:
-            stat = wiredtiger.stat.dsrc.rec_page_full_image_leaf
-
-        # Setup: Initialize the stable timestamp
+        # Setup: Initialize timestamps with stable < prepare timestamp
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(20)}')
+        self.conn.set_timestamp(f'oldest_timestamp={self.timestamp_str(10)}')
 
         create_params = 'key_format=i,value_format=S,type=layered'
         self.session.create(self.uri, create_params)
@@ -172,7 +151,7 @@ class test_layered69(test_prepare_preserve_prepare_base):
         # Verify checkpoint writes no prepared to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: not self.delta,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: False,
         }, self.uri)
 
         if self.evict:
@@ -197,30 +176,29 @@ class test_layered69(test_prepare_preserve_prepare_base):
 
         # Rollback the prepared transaction
         session_prepare.rollback_transaction(f'rollback_timestamp={self.timestamp_str(45)}')
-        session_prepare.close()
 
-        # Verify checkpoint skips writing a page to disk
+        # Verify checkpoint writes an empty delta to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: False,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: False,
         }, self.uri)
 
         # Make stable timestamp equal to prepare timestamp - this should allow checkpoint to reconcile prepared update
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(35)}')
 
-        # Verify checkpoint writes a page with prepared time window to disk
+        # Verify checkpoint writes a delta with prepared time window to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: True,
-            stat: True,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: True,
         }, self.uri)
 
         # Make stable timestamp equal to rollback timestamp
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(45)}')
 
-        # Verify checkpoint writes a page with the committed update to disk
+        # Verify checkpoint writes a delta with the committed update to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: True,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: True,
         }, self.uri)
 
         # Verify the key
@@ -228,12 +206,7 @@ class test_layered69(test_prepare_preserve_prepare_base):
         self.assertEqual(cursor.search(), wiredtiger.WT_NOTFOUND)
 
     def test_rollback_prepared_remove(self):
-        if self.delta:
-            stat = wiredtiger.stat.dsrc.rec_page_delta_leaf
-        else:
-            stat = wiredtiger.stat.dsrc.rec_page_full_image_leaf
-
-        # Setup: Initialize the stable timestamp
+        # Setup: Initialize stable timestamp
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(20)}')
 
         create_params = 'key_format=i,value_format=S,type=layered'
@@ -254,7 +227,7 @@ class test_layered69(test_prepare_preserve_prepare_base):
         # Verify checkpoint writes no prepared to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: not self.delta,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: False,
         }, self.uri)
 
         if self.evict:
@@ -278,30 +251,29 @@ class test_layered69(test_prepare_preserve_prepare_base):
 
         # Rollback the prepared transaction
         session_prepare.rollback_transaction(f'rollback_timestamp={self.timestamp_str(45)}')
-        session_prepare.close()
 
-        # Verify checkpoint skips writing a page to disk
+        # Verify checkpoint writes an empty delta to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: False,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: False,
         }, self.uri)
 
         # Make stable timestamp equal to prepare timestamp - this should allow checkpoint to reconcile prepared update
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(35)}')
 
-        # Verify checkpoint writes a page with prepared time window to disk
+        # Verify checkpoint writes a delta with prepared time window to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: True,
-            stat: True,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: True,
         }, self.uri)
 
         # Make stable timestamp equal to rollback timestamp
         self.conn.set_timestamp(f'stable_timestamp={self.timestamp_str(45)}')
 
-        # Verify checkpoint writes a page with the committed update to disk
+        # Verify checkpoint writes a delta with the committed update to disk
         self.checkpoint_and_verify_stats({
             wiredtiger.stat.dsrc.rec_time_window_prepared: False,
-            stat: True,
+            wiredtiger.stat.dsrc.rec_page_delta_leaf: True,
         }, self.uri)
 
         # Verify the key

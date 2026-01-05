@@ -1211,6 +1211,7 @@ struct __wt_connection_stats {
     int64_t rec_page_mods_le500;
     int64_t rec_page_mods_gt500;
     int64_t rec_hs_wrapup_next_prev_calls;
+    int64_t rec_skip_empty_deltas;
     int64_t rec_page_delete_fast;
     int64_t rec_page_full_image_internal;
     int64_t rec_page_full_image_leaf;
@@ -1264,7 +1265,6 @@ struct __wt_connection_stats {
     int64_t rec_time_window_stop_txn;
     int64_t rec_split_stashed_bytes;
     int64_t rec_split_stashed_objects;
-    int64_t rec_skip_write;
     int64_t local_objects_inuse;
     int64_t flush_tier_fail;
     int64_t flush_tier;
@@ -1707,6 +1707,7 @@ struct __wt_dsrc_stats {
     int64_t rec_page_mods_gt500;
     int64_t rec_hs_wrapup_next_prev_calls;
     int64_t rec_dictionary;
+    int64_t rec_skip_empty_deltas;
     int64_t rec_page_delete_fast;
     int64_t rec_page_full_image_internal;
     int64_t rec_page_full_image_leaf;
@@ -1756,7 +1757,6 @@ struct __wt_dsrc_stats {
     int64_t rec_time_window_durable_stop_ts;
     int64_t rec_time_window_stop_ts;
     int64_t rec_time_window_stop_txn;
-    int64_t rec_skip_write;
     int64_t session_compact;
     int64_t txn_read_race_prepare_commit;
     int64_t txn_read_overflow_remove;

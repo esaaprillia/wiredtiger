@@ -98,7 +98,7 @@ class test_layered35(wttest.WiredTigerTestCase):
         cursor[str(1)] = value2
         self.session.commit_transaction("commit_timestamp=" + self.timestamp_str(10))
 
-        # We should skip writing the page
+        # We should build an empty delta
         self.session.checkpoint()
 
         # Specify "local_files_action=ignore" to avoid deleting local files on reopen.
