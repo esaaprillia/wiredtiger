@@ -1134,7 +1134,7 @@ __wti_rec_row_leaf(
 
         /* Take the timestamp from the update or the cell. */
         if (upd == NULL) {
-            twp = &vpack->tw;
+            twp = &vpack->tw; /* Maybe it's the on-disk tomestone tw */
             /*
              * If preserve prepared update is enabled, we must select an update to replace the
              * onpage prepared update. Otherwise, we leak the prepared update.
