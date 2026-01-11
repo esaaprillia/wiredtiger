@@ -272,6 +272,10 @@ __wt_lex_compare_skip(
  * __wt_compare_skip --
  *     The same as __wt_lex_compare_skip, but using the application's collator function when
  *     configured.
+ * Returns:(*cmpp)
+ *     0: user_item > tree_item
+ *    -1: user_item < tree_item
+ *     1: user_item > tree_item
  */
 static WT_INLINE int
 __wt_compare_skip(WT_SESSION_IMPL *session, WT_COLLATOR *collator, const WT_ITEM *user_item,

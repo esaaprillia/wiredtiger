@@ -77,6 +77,7 @@ __rec_cell_build_int_key(WT_SESSION_IMPL *session, WTI_RECONCILE *r, const void 
  * __rec_cell_build_leaf_key --
  *     Process a key and return a WT_CELL structure and byte string to be stored on a row-store leaf
  *     page.
+ *  set the data of the key to r->k
  */
 static int
 __rec_cell_build_leaf_key(WT_SESSION_IMPL *session, WTI_RECONCILE *r, const void *data, size_t size,
@@ -134,7 +135,7 @@ __rec_cell_build_leaf_key(WT_SESSION_IMPL *session, WTI_RECONCILE *r, const void
          * Overflow objects aren't prefix compressed -- rebuild any object that was prefix
          * compressed.
          */
-        if (pfx == 0) {
+        if (pfx == 0) {/* there are no same bytes between the current key and the last key */
             WT_STAT_CONN_DSRC_INCR(session, rec_overflow_key_leaf);
 
             *is_ovflp = true;

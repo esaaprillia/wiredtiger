@@ -266,7 +266,7 @@ struct __wt_page_history_item {
     uint32_t num_evicts;
     uint32_t num_reads;
 
-    uint8_t page_type;
+    uint8_t page_type; 
 };
 
 /*

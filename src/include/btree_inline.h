@@ -1821,14 +1821,21 @@ __wt_ref_addr_copy(WT_SESSION_IMPL *session, WT_REF *ref, WT_ADDR_COPY *copy)
      * WT_ADDRs and swapped into place. The content of the two WT_ADDRs are identical, and we don't
      * care which version we get as long as we don't mix-and-match the two.
      */
-    addr = (WT_ADDR *)ref->addr;
+    addr = (WT_ADDR *)ref->addr; /* The cookie address of the page on disk(including the file, 
+    offset, etc...), while page->dsk is the address of the disk image of the page in the memory
+    The system get the page image by ref->addr and save this original image to a separate memory as 
+    page->dsk; */
+
     WT_ACQUIRE_BARRIER();
 
     /* If NULL, there is no information. */
     if (addr == NULL)
         return (false);
 
-    /* If off-page, the pointer references a WT_ADDR structure. */
+    /* If off-page, the pointer references a WT_ADDR structure.
+       If on-page, the pointer references a cell belonged to its parent's one cell. 
+       Row Internal pages have WT_CELL_KEY and WT_CELL_ADDR_XXX that include the child pages'
+       cookie address */
     if (__wt_off_page(page, addr)) {
         WT_TIME_AGGREGATE_COPY(&copy->ta, &addr->ta);
         copy->type = addr->type;

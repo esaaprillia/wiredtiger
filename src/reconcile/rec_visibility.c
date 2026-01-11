@@ -763,6 +763,8 @@ __rec_upd_select(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_CELL_UNPACK_KV *
                         break;
                     continue;
                 }
+                /* else the prepare is not confirmed to be rolled back stably, 
+                   so should be continue to check later*/
             } else if (prepare_state != WT_PREPARE_LOCKED)
                 /*
                  * We set the prepare state back to in progress after we have set the transaction id
@@ -771,7 +773,16 @@ __rec_upd_select(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_CELL_UNPACK_KV *
                  */
                 continue;
 
-            txnid = upd->upd_saved_txnid;
+            /* 1) prepare == WT_PREPARE_PROCESSED && (upd->upd_rollback_ts == WT_TS_NONE ||
+             *      upd->upd_rollback_ts > r->rec_start_pinned_stable_ts)
+             *
+             * 2) prepare == WT_PREPARE_LOCKED
+             *
+             * In both cases, we need to continue to process the prepared update for consistency.
+             */
+            txnid = upd->upd_saved_txnid; 
+            /* For rolled back prepare transaction, before upd->txnid is set to WT_TXN_ABORTED, its
+            value is transferred to upd->upd_saved_txnid in __txn_resolve_prepared_update_chain */
         }
 
         /*
