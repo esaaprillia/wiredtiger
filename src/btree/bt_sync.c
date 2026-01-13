@@ -267,7 +267,7 @@ __wt_sync_file(WT_SESSION_IMPL *session, WT_CACHE_OP syncop)
             rec_flags |= WT_REC_HS;
 
         /* Write all dirty in-cache pages. */
-        LF_SET(WT_READ_NO_EVICT);
+        LF_SET(WT_READ_NO_EVICT); /* dusf: Maybe indicating no eviction when reading/inserting */
 
         /* Limit reads to cache-only. */
         LF_SET(WT_READ_CACHE);

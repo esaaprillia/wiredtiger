@@ -2066,7 +2066,7 @@ __rec_set_updates_durable(WT_SESSION_IMPL *session, WT_MULTI *multi)
          * Mark the update that has been written to prevent it from being included in a future
          * delta.
          */
-        if (supd->onpage_upd == NULL)
+        if (supd->onpage_upd == NULL) /* supd->onpage_tombstone != NULL */
             F_SET(supd->onpage_tombstone, WT_UPDATE_DELETE_DURABLE);
         else {
             if (supd->onpage_tombstone != NULL) {
