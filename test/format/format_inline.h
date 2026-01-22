@@ -148,7 +148,7 @@ mmrand(WT_RAND_STATE *rnd, u_int min, u_int max)
  *     sleep times.
  */
 static inline void
-random_sleep(WT_RAND_STATE *rnd, u_int max_seconds)
+random_sleep(WT_RAND_STATE *rnd, u_int max_milliseconds)
 {
     uint64_t i, micro_seconds;
 
@@ -165,7 +165,7 @@ random_sleep(WT_RAND_STATE *rnd, u_int max_seconds)
     if (i == 0)
         __wt_yield();
     else {
-        micro_seconds = (uint64_t)max_seconds * WT_MILLION;
+        micro_seconds = (uint64_t)max_milliseconds * WT_THOUSAND;
         __wt_sleep(0, i * (micro_seconds / 10));
     }
 }

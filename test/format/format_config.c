@@ -658,7 +658,7 @@ config_cache(void)
 {
     uint64_t cache, workers;
     bool cache_maximum_explicit;
-#define PRECISE_CHECKPOINT_MIN_CACHE ((uint32_t)3072)
+#define PRECISE_CHECKPOINT_MIN_CACHE ((uint32_t)5120)
     char buf[64];
 
     /* The maximum cache is only set if it is non-zero and explicitly set. */
