@@ -185,7 +185,7 @@ timestamp(void *arg)
     while (!g.workers_finished) {
         if (!GV(RUNS_PREDICTABLE_REPLAY)) {
             if (GV(PRECISE_CHECKPOINT))
-                random_sleep(&g.extra_rnd, 1000);
+                random_sleep(&g.extra_rnd, 500);
             else
                 random_sleep(&g.extra_rnd, 15*WT_THOUSAND);
         } else {
