@@ -1757,8 +1757,14 @@ __evict_walk(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue)
 
     /*
      * Set the starting slot in the queue and the maximum pages added per walk.
+     * queue->evict_entries, is the previous position in the queue already filled,
+     * also is the start position for this walk.
      */
     start_slot = slot = queue->evict_entries;
+
+    /* evict->evict_slots is the maximum number of slots in the eviction queue
+     * = WTI_EVICT_WALK_BASE + WTI_EVICT_WALK_INCR = 300+100 = 400
+     */
     max_entries = WT_MIN(slot + WTI_EVICT_WALK_INCR, evict->evict_slots);
 
     /*
@@ -1769,19 +1775,27 @@ __evict_walk(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue)
         __wt_cache_pages_inuse(cache) :
         __wt_atomic_load_uint64_relaxed(&cache->pages_dirty_leaf));
 
-    /* The naming of the max_entries is misleading, it actually represents the farthest
-        position the queue can be filled this walk starting from slot, so actually the
-        maximum number of pages that can be filled is max_entries - slot.
-        When last walk get bigger slot, it's more unlikely to be able to queue this walk.
-        e.g. : last walk, slot = 300, total_candidates = 500, 
-        max_entries = 1 + 500 / 2 = 251, so we can only queue 251 - 300 = -49 pages.
-        This is a bug, so we cap max_entries to avoid negative numbers.
-        and slot = 300 > 251, the following loop wil not hit. */
-    max_entries = WT_MIN(max_entries, 1 + total_candidates / 2); 
+    /* Note: The variable name 'max_entries' is misleading—it actually represents the
+    * farthest position in the queue that can be filled during this walk starting
+    * from 'slot'. Therefore, the actual maximum number of pages that can be filled
+    * is 'max_entries - slot'.
+    *
+    * When a previous walk obtained a larger 'slot' value, the current walk becomes
+    * less likely to queue pages. For example:
+    * - Previous walk: slot = 300, total_candidates = 500
+    * - max_entries = 1 + 500 / 2 = 251
+    * - Queueable pages: 251 - 300 = -49 (negative!)
+    *
+    * To prevent this bug, we cap 'max_entries' to avoid negative values like this:
+    * max_entries = WT_MIN(max_entries, slot+1 + total_candidates / 2); 
+    * Otherwise, since slot = 300 > 251, the following loop will not execute. 
+    */
+    max_entries = WT_MIN(max_entries, 1 + total_candidates / 2);
 
 retry:
     loop_count = 0;
-    while (slot < max_entries && loop_count++ < conn->dhandle_count) { /* This will not hit as the above mentioned */
+    /* This will not hit as the above mentioned comment */
+    while (slot < max_entries && loop_count++ < conn->dhandle_count) {
         /* We're done if shutting down or reconfiguring. */
         if (F_ISSET_ATOMIC_32(conn, WT_CONN_CLOSING))
             break;
@@ -1851,7 +1865,13 @@ retry:
             continue;
         }
 
-        /* Skip files that are checkpointing if we are only looking for dirty pages. */
+        /* Skip files that are checkpointing when only looking for dirty pages
+         * (WT_EVICT_CACHE_CLEAN and WT_EVICT_CACHE_UPDATES are not set).
+         * Checkpoint will handle flushing dirty pages to disk; skip eviction to avoid
+         * contention.If WT_EVICT_CACHE_CLEAN and WT_EVICT_CACHE_DIRTY are both set,
+         * we are looking for all pages, so do not skip checkpointing trees, in which case
+         * how to avoid contention?
+         */
         if (WT_BTREE_SYNCING(btree) &&
           !F_ISSET(evict, WT_EVICT_CACHE_CLEAN | WT_EVICT_CACHE_UPDATES)) {
             WT_STAT_CONN_INCR(session, eviction_server_skip_checkpointing_trees);
@@ -1860,7 +1880,7 @@ retry:
         }
 
         /*
-         * Skip files that are configured to stick in cache until we become aggressive.
+         * Skip files(currently only one case of metadata) that are configured to stick in cache until we become aggressive.
          *
          * If the file is contributing heavily to our cache usage then ignore the "stickiness" of
          * its pages.
