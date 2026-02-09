@@ -2086,6 +2086,20 @@ static const char *const __stats_connection_desc[] = {
   "checkpoint",
   "cache: page split during eviction deepened the tree",
   "cache: page written requiring history store records",
+  "cache: page_cache_average_op_time",
+  "cache: page_cache_hash_size",
+  "cache: page_cache_hit",
+  "cache: page_cache_max_bucket_size",
+  "cache: page_cache_max_get_time",
+  "cache: page_cache_max_page_ref_count",
+  "cache: page_cache_max_put_time",
+  "cache: page_cache_max_release_time",
+  "cache: page_cache_memory_allocated",
+  "cache: page_cache_miss",
+  "cache: page_cache_total_entry_count",
+  "cache: page_cache_total_op",
+  "cache: page_cache_total_op_time",
+  "cache: page_cache_total_page_count",
   "cache: pages considered for eviction that were brought in by pre-fetch",
   "cache: pages currently held in the cache",
   "cache: pages currently held in the cache from the ingest btrees",
@@ -3110,6 +3124,20 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->cache_eviction_blocked_disagg_next_checkpoint = 0;
     stats->cache_eviction_deepen = 0;
     stats->cache_write_hs = 0;
+    stats->page_cache_average_op_time = 0;
+    stats->page_cache_hash_size = 0;
+    stats->page_cache_hit = 0;
+    stats->page_cache_max_bucket_size = 0;
+    stats->page_cache_max_get_time = 0;
+    stats->page_cache_max_page_ref_count = 0;
+    stats->page_cache_max_put_time = 0;
+    stats->page_cache_max_release_time = 0;
+    stats->page_cache_memory_allocated = 0;
+    stats->page_cache_miss = 0;
+    stats->page_cache_total_entry_count = 0;
+    stats->page_cache_total_op = 0;
+    stats->page_cache_total_op_time = 0;
+    stats->page_cache_total_page_count = 0;
     /* not clearing eviction_consider_prefetch */
     /* not clearing cache_pages_inuse */
     /* not clearing cache_pages_inuse_ingest */
@@ -4197,6 +4225,20 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
       WT_STAT_CONN_READ(from, cache_eviction_blocked_disagg_next_checkpoint);
     to->cache_eviction_deepen += WT_STAT_CONN_READ(from, cache_eviction_deepen);
     to->cache_write_hs += WT_STAT_CONN_READ(from, cache_write_hs);
+    to->page_cache_average_op_time += WT_STAT_CONN_READ(from, page_cache_average_op_time);
+    to->page_cache_hash_size += WT_STAT_CONN_READ(from, page_cache_hash_size);
+    to->page_cache_hit += WT_STAT_CONN_READ(from, page_cache_hit);
+    to->page_cache_max_bucket_size += WT_STAT_CONN_READ(from, page_cache_max_bucket_size);
+    to->page_cache_max_get_time += WT_STAT_CONN_READ(from, page_cache_max_get_time);
+    to->page_cache_max_page_ref_count += WT_STAT_CONN_READ(from, page_cache_max_page_ref_count);
+    to->page_cache_max_put_time += WT_STAT_CONN_READ(from, page_cache_max_put_time);
+    to->page_cache_max_release_time += WT_STAT_CONN_READ(from, page_cache_max_release_time);
+    to->page_cache_memory_allocated += WT_STAT_CONN_READ(from, page_cache_memory_allocated);
+    to->page_cache_miss += WT_STAT_CONN_READ(from, page_cache_miss);
+    to->page_cache_total_entry_count += WT_STAT_CONN_READ(from, page_cache_total_entry_count);
+    to->page_cache_total_op += WT_STAT_CONN_READ(from, page_cache_total_op);
+    to->page_cache_total_op_time += WT_STAT_CONN_READ(from, page_cache_total_op_time);
+    to->page_cache_total_page_count += WT_STAT_CONN_READ(from, page_cache_total_page_count);
     to->eviction_consider_prefetch += WT_STAT_CONN_READ(from, eviction_consider_prefetch);
     to->cache_pages_inuse += WT_STAT_CONN_READ(from, cache_pages_inuse);
     to->cache_pages_inuse_ingest += WT_STAT_CONN_READ(from, cache_pages_inuse_ingest);

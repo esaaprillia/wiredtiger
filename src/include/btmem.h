@@ -585,6 +585,13 @@ struct __wt_split_page_hist {
 };
 #endif
 
+/* WT_PAGE_SHARE */
+struct __wt_page_share {
+    wt_shared uint32_t ref_count;
+    const WT_PAGE_HEADER *dsk;
+    /*...*/
+};
+
 /*
  * WT_PAGE --
  *	The WT_PAGE structure describes the in-memory page information.
@@ -825,6 +832,7 @@ struct __wt_page {
 #else
 #define WT_SPLIT_PAGE_SAVE_STATE(page, session, e, g)
 #endif
+    WT_PAGE_CACHE_ITEM *page_cache_item;
 };
 
 /*

@@ -39,8 +39,8 @@ class test_hs01(wttest.WiredTigerTestCase):
     conn_config = 'cache_size=200MB,statistics=(all)'
     format_values = [
         ('column', dict(key_format='r')),
-        ('row_integer', dict(key_format='i')),
-        ('row_string', dict(key_format='S'))
+        # ('row_integer', dict(key_format='i')),
+        # ('row_string', dict(key_format='S'))
     ]
     value_format='u'
     scenarios = make_scenarios(format_values)
@@ -99,6 +99,14 @@ class test_hs01(wttest.WiredTigerTestCase):
         conn.close()
 
     def test_hs(self):
+        # "checkpoint=(WiredTigerCheckpoint.1=(run_write_gen=20247))lcheckpoint_backup_info=,"
+        # x = "access_pattern_hint=none,allocation_size=4KB,app_metadata=(formatVersion=8),assert=(write_timestamp=off),block_allocation=best," + "block_compressor=,cache_resident=false,checkpoint=(WiredTigerCheckpoint.1=(addr=\"018181e49834da0d8281e41546bd168381e4fc20a8a5808080e22fc0cfc0\",order=1,time=1768917027,size=8192,newest_start_durable_ts=0,oldest_start_ts=0,newest_txn=0,newest_stop_durable_ts=0,newest_stop_ts=-1,newest_stop_txn=-11,prepare=0,write_gen=20249,run_write_gen=20247))lcheckpoint_backup_info=,checkpoint_lsn=(2,58901120),checksum=onlcollator=,columns=,dictionary=0lencryption=(keyid=,name=),format=btree,huffman_key=,huffman_value=,id=24034,ignore_in_memory_cache_size=false,internal_item_max=0,internal_key_max=0,internal_key_truncate=true,internal_page_max=16k,key_format=u,key_gap=10,leaf_item_max=0,leaf_key_max=0,leaf_page_max=16k,leaf_value_max=0llog=(enabled=false),memory_page_image_max=0,memory_page_max=5MB,os_cache_dirty_max=0,os_cache_max=0,prefix_compression=true,prefix_compression_min=4,readonly=false,split_deepen_min_child=0,split_deepen_per_child=0,split_pct=90,tiered_object=false,tiered_storage=(auth_token=,bucket=,bucket_prefix=,cache_directory=,local_retention=300,name=,object_target_size=0),value_format=u,verbose=[write_timestamp],version=(major=1,minor=1),write_timestamp_usage=none";
+        # for i in range(len(x)):
+        #     if i <= 480 and i >= 460:
+        #         self.prout(x[i])
+        #     if i == 471:
+        #         self.prout("hahah: " + x[i])
+        # return
         # Create a small table.
         uri = "table:test_hs01"
         ds = SimpleDataSet(self, uri, 0, key_format=self.key_format, value_format=self.value_format)

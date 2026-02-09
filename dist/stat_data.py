@@ -343,6 +343,20 @@ conn_stats = [
     CacheStat('cache_write_app_time', 'application threads page write from cache to disk time (usecs)'),
     CacheStat('npos_evict_walk_max', 'eviction walk restored - had to walk this many pages', 'max_aggregate,no_scale'),
     CacheStat('npos_read_walk_max', 'npos read - had to walk this many pages', 'max_aggregate,no_scale'),
+    CacheStat('page_cache_average_op_time', 'page_cache_average_op_time', 'no_scale'),
+    CacheStat('page_cache_hash_size', 'page_cache_hash_size', 'no_scale'),
+    CacheStat('page_cache_hit', 'page_cache_hit', 'no_scale'),
+    CacheStat('page_cache_max_bucket_size', 'page_cache_max_bucket_size', 'no_scale'),
+    CacheStat('page_cache_max_get_time', 'page_cache_max_get_time', 'no_scale'),
+    CacheStat('page_cache_max_page_ref_count', 'page_cache_max_page_ref_count', 'no_scale'),
+    CacheStat('page_cache_max_put_time', 'page_cache_max_put_time', 'no_scale'),
+    CacheStat('page_cache_max_release_time', 'page_cache_max_release_time', 'no_scale'),
+    CacheStat('page_cache_memory_allocated', 'page_cache_memory_allocated', 'no_scale'),
+    CacheStat('page_cache_miss', 'page_cache_miss', 'no_scale'),
+    CacheStat('page_cache_total_entry_count', 'page_cache_total_entry_count', 'no_scale'),
+    CacheStat('page_cache_total_op', 'page_cache_total_op', 'no_scale'),
+    CacheStat('page_cache_total_op_time', 'page_cache_total_op_time', 'no_scale'),
+    CacheStat('page_cache_total_page_count', 'page_cache_total_page_count', 'no_scale'),
 
     ##########################################
     # Eviction statistics

@@ -46,6 +46,8 @@ __wt_cache_config(WT_SESSION_IMPL *session, const char *cfg[], bool reconfig)
      */
     if (!now_shared) {
         WT_RET(__wt_config_gets(session, cfg, "cache_size", &cval));
+        /* Use 5% of cache size as spare cache for the page cache table. */
+        // conn->cache_size = (uint64_t)cval.val / 20 * 19;
         conn->cache_size = (uint64_t)cval.val;
     }
     /* Set config values as percentages. */
@@ -67,6 +69,13 @@ __wt_cache_create(WT_SESSION_IMPL *session, const char *cfg[])
 
     /* Use a common routine for run-time configuration options. */
     WT_RET(__wt_cache_config(session, cfg, false));
+
+    /* Use 2% of cache size, assume each entry spends 1000B. */
+    uint64_t x = S2C(session)->cache_size;
+
+    WT_RET(__wti_page_cache_init(session, (u_int)(x / 50 / 100)));
+    WT_STAT_CONN_SET(session, page_cache_memory_allocated, x / 50);
+    WT_STAT_CONN_SET(session, page_cache_hash_size, x / 50 / 1000);
 
     /*
      * We get/set some values in the cache statistics (rather than have two copies), configure them.
@@ -237,6 +246,9 @@ __wt_cache_destroy(WT_SESSION_IMPL *session)
           __wt_atomic_load_uint64_relaxed(&cache->bytes_dirty_intl) +
             __wt_atomic_load_uint64_relaxed(&cache->bytes_dirty_leaf),
           cache->pages_dirty_intl + cache->pages_dirty_leaf);
+
+    /* Destroy the page cache. */
+    __wti_page_cache_destroy(session);
 
     __wt_free(session, conn->cache);
     return (0);
