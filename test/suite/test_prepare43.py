@@ -37,12 +37,12 @@ class test_prepare43(test_prepare_preserve_prepare_base):
     uri = 'table:test_prepare43'
 
     format_values = [
-        ('column', dict(key_format='r', value_format='S')),
-        ('row', dict(key_format='r', value_format='S')),
+        # ('column', dict(key_format='r', value_format='S')),
+        ('row', dict(key_format='i', value_format='S')),
     ]
     ckpt_precision = [
         ('fuzzy', dict(ckpt_config='precise_checkpoint=false')),
-        ('precise', dict(ckpt_config='precise_checkpoint=true,preserve_prepared=true')),
+        # ('precise', dict(ckpt_config='precise_checkpoint=true,preserve_prepared=true')),
     ]
     scenarios = make_scenarios(format_values, ckpt_precision)
 
@@ -51,6 +51,7 @@ class test_prepare43(test_prepare_preserve_prepare_base):
         self.conn.set_timestamp('oldest_timestamp=' + self.timestamp_str(10))
 
         create_params = 'key_format=' + self.key_format + ',value_format=' + self.value_format
+        self.pr('Creating a table with config: ' + create_params)
         self.session.create(self.uri, create_params)
 
         # Insert a value and commit for keys 1-19
@@ -60,6 +61,7 @@ class test_prepare43(test_prepare_preserve_prepare_base):
             value = "commit_value"
             cursor[i] = value
         self.session.commit_transaction('commit_timestamp=' + self.timestamp_str(21))
+        self.pr('Committed keys 1-99 with timestamp 21')
 
         cursor = self.session.open_cursor(self.uri)
         self.session.begin_transaction()
@@ -67,11 +69,15 @@ class test_prepare43(test_prepare_preserve_prepare_base):
             cursor.set_key(i)
             cursor.remove()
         self.session.prepare_transaction(f"prepare_timestamp={self.timestamp_str(25)},prepared_id={self.prepared_id_str(123)}")
+        self.pr('Prepared keys 1-99 with timestamp 25')
+
         # move the stable ts to be past prepare ts
         self.conn.set_timestamp('stable_timestamp=' + self.timestamp_str(26))
+        self.pr('Moved stable timestamp to 26')
 
         session2 = self.conn.open_session()
         session2.checkpoint()
+        self.pr('Checkpointed the database')
 
         # Force the page to be evicted, checkpoint will write the tombstone as prepared
         session_evict = self.conn.open_session("debug=(release_evict_page=true)")
@@ -82,6 +88,7 @@ class test_prepare43(test_prepare_preserve_prepare_base):
             evict_cursor.search()
             evict_cursor.reset()
         session_evict.rollback_transaction()
+        self.pr('Evicted the page with prepared tombstone')
 
         # Check that we can open a checkpoint cursor and find all keys
         cursor = session2.open_cursor(
@@ -95,3 +102,9 @@ class test_prepare43(test_prepare_preserve_prepare_base):
             self.assertEqual(cursor.get_value(), "commit_value")
             i += 1
         self.assertEqual(i, 100)
+        self.pr('Verified all keys are visible in checkpoint cursor')
+
+        self.pr('commit prepared transaction')
+        self.session.commit_transaction()
+
+

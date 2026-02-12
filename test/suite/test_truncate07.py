@@ -140,9 +140,11 @@ class test_truncate07(wttest.WiredTigerTestCase):
         for i in range(1, nrows + 1):
             cursor[ds.key(i)] = value_a
         self.session.commit_transaction('commit_timestamp=' + self.timestamp_str(10))
+        self.pr('writing a bunch of data finished')
 
         # This data can be stable; move the stable timestamp forward.
         self.conn.set_timestamp('stable_timestamp=' + self.timestamp_str(10))
+        self.pr('stable timestamp 10 moved forward')
 
         # Munge some of it at time 20. Touch every other even-numbered key in the middle third of
         # the data. (This allows using the odd keys to evict.)
@@ -164,6 +166,7 @@ class test_truncate07(wttest.WiredTigerTestCase):
                 self.assertEqual(cursor2.remove(), 0)
         session2.prepare_transaction('prepare_timestamp=' + self.timestamp_str(20))
         cursor2.close()
+        self.pr('prepare transaction finished')
 
         # Evict the lot so that we can fast-truncate.
         # For now, evict every 4th key explicitly; FUTURE: improve this to evict each page only
@@ -171,6 +174,7 @@ class test_truncate07(wttest.WiredTigerTestCase):
         if self.do_evict:
             for i in range(1, nrows + 1, 4):
                 self.evict(ds.uri, ds.key(i), value_a)
+        self.pr('eviction finished')
 
         if self.do_checkpoint:
             self.session.checkpoint()
@@ -180,8 +184,9 @@ class test_truncate07(wttest.WiredTigerTestCase):
         err = self.truncate(ds.uri, ds.key, nrows // 4, nrows - nrows // 4)
         self.assertEqual(err, WT_ROLLBACK)
         self.session.rollback_transaction()
+        self.pr('truncate finished')
 
         # Move the stable timestamp forward before exiting so we don't waste time rolling
         # back the rest of the changes during shutdown.
         self.conn.set_timestamp('stable_timestamp=' + self.timestamp_str(50))
-
+        self.pr('stable timestamp 50 moved forward')
