@@ -8,6 +8,26 @@
 
 #include "wt_internal.h"
 
+static WT_INLINE uint64_t
+help_bucket(uint64_t hash, u_int hash_size)
+{
+    /* simulate collision on buckets, index 0-50% are 1:1 mapped to their buckets, index 50%-90% are
+     * 5:1 mapped to their buckets index 90%-100% are 20 : 1 mapped to their buckets.*/
+    uint64_t bucket = hash % hash_size;
+    u_int t50 = hash_size / 2;
+    u_int t90 = hash_size / 10 * 9;
+    /* this simulates collsion, the first 50% of buckets are mapped to first 50% slots, the next 40%
+     * of buckets are mapped to the next 40%/5 which is 8% of slots, the last 10% of buckets are
+     * mapped to 0.5% of slots.*/
+    if (bucket <= t50) {
+        return bucket;
+    } else if (bucket <= t90) {
+        return (bucket - t50) / 5 + t50;
+    } else {
+        return (bucket - t90) / 20 + t90;
+    }
+}
+
 /*
  * __page_cache_verbose --
  *     Block cache verbose logging.
@@ -57,7 +77,7 @@ __wt_page_cache_get(WT_SESSION_IMPL *session, const uint8_t *addr, size_t addr_s
     WT_STAT_CONN_INCR(session, block_cache_lookups);
 
     hash = __wt_hash_city64(addr, addr_size);
-    bucket = hash % page_cache->hash_size;
+    bucket = help_bucket(hash, page_cache->hash_size);
     __wt_spin_lock(session, &page_cache->hash_locks[bucket]);
     TAILQ_FOREACH (page_cache_item, &page_cache->hash[bucket], hashq) {
         if (page_cache_item->addr_size == addr_size && page_cache_item->fid == S2BT(session)->id &&
@@ -147,7 +167,7 @@ __wt_page_cache_put(WT_SESSION_IMPL *session, const void *data, size_t data_size
     memcpy(page_cache_store->addr, addr, addr_size);
 
     hash = __wt_hash_city64(addr, addr_size);
-    bucket = hash % page_cache->hash_size;
+    bucket = help_bucket(hash, page_cache->hash_size);
     __wt_spin_lock(session, &page_cache->hash_locks[bucket]);
 
     /*
@@ -227,7 +247,7 @@ __wt_page_cache_release(WT_SESSION_IMPL *session, const uint8_t *addr, size_t ad
 
     page_cache = &S2C(session)->cache->page_cache;
     hash = __wt_hash_city64(addr, addr_size);
-    bucket = hash % page_cache->hash_size;
+    bucket = help_bucket(hash, page_cache->hash_size);
 
     __wt_spin_lock(session, &page_cache->hash_locks[bucket]);
     /* Remove the page cache when ref count is reduced to 0.*/

@@ -70,12 +70,16 @@ __wt_cache_create(WT_SESSION_IMPL *session, const char *cfg[])
     /* Use a common routine for run-time configuration options. */
     WT_RET(__wt_cache_config(session, cfg, false));
 
-    /* Use 2% of cache size, assume each entry spends 1000B. */
+    /* A workload with ~200GB cache is having ~2M pages, assume no page is reused, the factor 2 is a
+     * good option for avoiding collision, we can choose 4M as hash size, assume each entry spends
+     * 100B, the cache usage of the hash table is 4M * 100B = 400MB, so the hash table consumes
+     * 400MB / 200GB = 0.2% of total cache. */
+    /* Use 0.2% of cache size, assume each entry spends 100B. */
     uint64_t x = S2C(session)->cache_size;
 
-    WT_RET(__wti_page_cache_init(session, (u_int)(x / 50 / 100)));
-    WT_STAT_CONN_SET(session, page_cache_memory_allocated, x / 50);
-    WT_STAT_CONN_SET(session, page_cache_hash_size, x / 50 / 1000);
+    WT_RET(__wti_page_cache_init(session, (u_int)(x / 500 / 100)));
+    WT_STAT_CONN_SET(session, page_cache_memory_allocated, x / 500);
+    WT_STAT_CONN_SET(session, page_cache_hash_size, x / 500 / 100);
 
     /*
      * We get/set some values in the cache statistics (rather than have two copies), configure them.
