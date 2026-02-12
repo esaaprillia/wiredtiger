@@ -335,6 +335,7 @@ static const char *const __stats_dsrc_desc[] = {
   "reconciliation: cursor next/prev calls during HS wrapup search_near",
   "reconciliation: dictionary matches",
   "reconciliation: fast-path pages deleted",
+  "reconciliation: free page ID due to failed page replacement reconciliation in disagg",
   "reconciliation: full internal pages written instead of a page delta",
   "reconciliation: full leaf pages written instead of a page delta",
   "reconciliation: internal page delta keys deleted",
@@ -769,6 +770,7 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->rec_hs_wrapup_next_prev_calls = 0;
     stats->rec_dictionary = 0;
     stats->rec_page_delete_fast = 0;
+    stats->rec_free_page_id_due_to_failed_replacement_reconciliation = 0;
     stats->rec_page_full_image_internal = 0;
     stats->rec_page_full_image_leaf = 0;
     stats->rec_page_delta_internal_key_deleted = 0;
@@ -1205,6 +1207,8 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
     to->rec_hs_wrapup_next_prev_calls += from->rec_hs_wrapup_next_prev_calls;
     to->rec_dictionary += from->rec_dictionary;
     to->rec_page_delete_fast += from->rec_page_delete_fast;
+    to->rec_free_page_id_due_to_failed_replacement_reconciliation +=
+      from->rec_free_page_id_due_to_failed_replacement_reconciliation;
     to->rec_page_full_image_internal += from->rec_page_full_image_internal;
     to->rec_page_full_image_leaf += from->rec_page_full_image_leaf;
     to->rec_page_delta_internal_key_deleted += from->rec_page_delta_internal_key_deleted;
@@ -1679,6 +1683,8 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
     to->rec_hs_wrapup_next_prev_calls += WT_STAT_DSRC_READ(from, rec_hs_wrapup_next_prev_calls);
     to->rec_dictionary += WT_STAT_DSRC_READ(from, rec_dictionary);
     to->rec_page_delete_fast += WT_STAT_DSRC_READ(from, rec_page_delete_fast);
+    to->rec_free_page_id_due_to_failed_replacement_reconciliation +=
+      WT_STAT_DSRC_READ(from, rec_free_page_id_due_to_failed_replacement_reconciliation);
     to->rec_page_full_image_internal += WT_STAT_DSRC_READ(from, rec_page_full_image_internal);
     to->rec_page_full_image_leaf += WT_STAT_DSRC_READ(from, rec_page_full_image_leaf);
     to->rec_page_delta_internal_key_deleted +=
@@ -1929,6 +1935,7 @@ static const char *const __stats_connection_desc[] = {
   "cache: eviction passes of a file",
   "cache: eviction server candidate queue empty when topping up",
   "cache: eviction server candidate queue not empty when topping up",
+  "cache: eviction server completed walks of all dhandles",
   "cache: eviction server push pages to queue failed because of racing with setting flag",
   "cache: eviction server races with the reconfigure API call in disagg",
   "cache: eviction server skipped the internal pages if eviction is not in aggressive mode",
@@ -1961,6 +1968,12 @@ static const char *const __stats_connection_desc[] = {
   "cache: eviction server unable to reach eviction goal",
   "cache: eviction server waiting for a leaf page",
   "cache: eviction state",
+  "cache: eviction threshold cache full target multiplied by 100 for precision",
+  "cache: eviction threshold cache full trigger multiplied by 100 for precision",
+  "cache: eviction threshold dirty target multiplied by 100 for precision",
+  "cache: eviction threshold dirty trigger multiplied by 100 for precision",
+  "cache: eviction threshold updates target multiplied by 100 for precision",
+  "cache: eviction threshold updates trigger multiplied by 100 for precision",
   "cache: eviction walk most recent sleeps for checkpoint handle gathering",
   "cache: eviction walk pages queued that had updates",
   "cache: eviction walk pages queued that were clean",
@@ -2085,6 +2098,7 @@ static const char *const __stats_connection_desc[] = {
   "checkpoint",
   "cache: page split during eviction deepened the tree",
   "cache: page written requiring history store records",
+  "cache: pages already in queue when topping up",
   "cache: pages considered for eviction that were brought in by pre-fetch",
   "cache: pages currently held in the cache",
   "cache: pages currently held in the cache from the ingest btrees",
@@ -2601,6 +2615,7 @@ static const char *const __stats_connection_desc[] = {
   "reconciliation: changes since prior reconciliation (bucket 8) greater than 500",
   "reconciliation: cursor next/prev calls during HS wrapup search_near",
   "reconciliation: fast-path pages deleted",
+  "reconciliation: free page ID due to failed page replacement reconciliation in disagg",
   "reconciliation: full internal pages written instead of a page delta",
   "reconciliation: full leaf pages written instead of a page delta",
   "reconciliation: internal page delta keys deleted",
@@ -2969,6 +2984,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->eviction_walk_passes = 0;
     stats->eviction_queue_empty = 0;
     stats->eviction_queue_not_empty = 0;
+    /* not clearing eviction_dhandle_complete_walk */
     stats->eviction_server_push_pages_failed_when_flaging = 0;
     stats->eviction_server_race_reconfigure_disagg = 0;
     stats->eviction_server_skip_intl_page_non_aggressive = 0;
@@ -2997,6 +3013,12 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->eviction_slow = 0;
     stats->eviction_walk_leaf_notfound = 0;
     /* not clearing eviction_state */
+    stats->eviction_threshold_cache_full_target = 0;
+    stats->eviction_threshold_cache_full_trigger = 0;
+    stats->eviction_threshold_dirty_target = 0;
+    stats->eviction_threshold_dirty_trigger = 0;
+    stats->eviction_threshold_updates_target = 0;
+    stats->eviction_threshold_updates_trigger = 0;
     stats->eviction_walk_sleeps = 0;
     stats->cache_eviction_pages_queued_updates = 0;
     stats->cache_eviction_pages_queued_clean = 0;
@@ -3108,6 +3130,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->cache_eviction_blocked_disagg_next_checkpoint = 0;
     stats->cache_eviction_deepen = 0;
     stats->cache_write_hs = 0;
+    stats->eviction_pages_remaining_in_queue = 0;
     /* not clearing eviction_consider_prefetch */
     /* not clearing cache_pages_inuse */
     /* not clearing cache_pages_inuse_ingest */
@@ -3619,6 +3642,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->rec_page_mods_gt500 = 0;
     stats->rec_hs_wrapup_next_prev_calls = 0;
     stats->rec_page_delete_fast = 0;
+    stats->rec_free_page_id_due_to_failed_replacement_reconciliation = 0;
     stats->rec_page_full_image_internal = 0;
     stats->rec_page_full_image_leaf = 0;
     stats->rec_page_delta_internal_key_deleted = 0;
@@ -3993,6 +4017,7 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->eviction_walk_passes += WT_STAT_CONN_READ(from, eviction_walk_passes);
     to->eviction_queue_empty += WT_STAT_CONN_READ(from, eviction_queue_empty);
     to->eviction_queue_not_empty += WT_STAT_CONN_READ(from, eviction_queue_not_empty);
+    to->eviction_dhandle_complete_walk += WT_STAT_CONN_READ(from, eviction_dhandle_complete_walk);
     to->eviction_server_push_pages_failed_when_flaging +=
       WT_STAT_CONN_READ(from, eviction_server_push_pages_failed_when_flaging);
     to->eviction_server_race_reconfigure_disagg +=
@@ -4045,6 +4070,17 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->eviction_slow += WT_STAT_CONN_READ(from, eviction_slow);
     to->eviction_walk_leaf_notfound += WT_STAT_CONN_READ(from, eviction_walk_leaf_notfound);
     to->eviction_state += WT_STAT_CONN_READ(from, eviction_state);
+    to->eviction_threshold_cache_full_target +=
+      WT_STAT_CONN_READ(from, eviction_threshold_cache_full_target);
+    to->eviction_threshold_cache_full_trigger +=
+      WT_STAT_CONN_READ(from, eviction_threshold_cache_full_trigger);
+    to->eviction_threshold_dirty_target += WT_STAT_CONN_READ(from, eviction_threshold_dirty_target);
+    to->eviction_threshold_dirty_trigger +=
+      WT_STAT_CONN_READ(from, eviction_threshold_dirty_trigger);
+    to->eviction_threshold_updates_target +=
+      WT_STAT_CONN_READ(from, eviction_threshold_updates_target);
+    to->eviction_threshold_updates_trigger +=
+      WT_STAT_CONN_READ(from, eviction_threshold_updates_trigger);
     to->eviction_walk_sleeps += WT_STAT_CONN_READ(from, eviction_walk_sleeps);
     to->cache_eviction_pages_queued_updates +=
       WT_STAT_CONN_READ(from, cache_eviction_pages_queued_updates);
@@ -4194,6 +4230,8 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
       WT_STAT_CONN_READ(from, cache_eviction_blocked_disagg_next_checkpoint);
     to->cache_eviction_deepen += WT_STAT_CONN_READ(from, cache_eviction_deepen);
     to->cache_write_hs += WT_STAT_CONN_READ(from, cache_write_hs);
+    to->eviction_pages_remaining_in_queue +=
+      WT_STAT_CONN_READ(from, eviction_pages_remaining_in_queue);
     to->eviction_consider_prefetch += WT_STAT_CONN_READ(from, eviction_consider_prefetch);
     to->cache_pages_inuse += WT_STAT_CONN_READ(from, cache_pages_inuse);
     to->cache_pages_inuse_ingest += WT_STAT_CONN_READ(from, cache_pages_inuse_ingest);
@@ -4820,6 +4858,8 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->rec_page_mods_gt500 += WT_STAT_CONN_READ(from, rec_page_mods_gt500);
     to->rec_hs_wrapup_next_prev_calls += WT_STAT_CONN_READ(from, rec_hs_wrapup_next_prev_calls);
     to->rec_page_delete_fast += WT_STAT_CONN_READ(from, rec_page_delete_fast);
+    to->rec_free_page_id_due_to_failed_replacement_reconciliation +=
+      WT_STAT_CONN_READ(from, rec_free_page_id_due_to_failed_replacement_reconciliation);
     to->rec_page_full_image_internal += WT_STAT_CONN_READ(from, rec_page_full_image_internal);
     to->rec_page_full_image_leaf += WT_STAT_CONN_READ(from, rec_page_full_image_leaf);
     to->rec_page_delta_internal_key_deleted +=

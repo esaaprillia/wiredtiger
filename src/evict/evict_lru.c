@@ -326,12 +326,8 @@ __evict_thread_run(WT_SESSION_IMPL *session, WT_THREAD *thread)
          * set the flag on both sessions because we may call clear_walk when we are walking with the
          * walk session, locked.
          */
-        FLD_SET(
-          session->lock_flags, WT_SESSION_LOCKED_PASS); /* The session is for the eviction
-                                                           management itself,e.g.,everytime there is
-                                                           only one eviction server thread */
-        FLD_SET(evict->walk_session->lock_flags,
-          WT_SESSION_LOCKED_PASS); /* The walk session is for the work of queueing pages */
+        FLD_SET(session->lock_flags, WT_SESSION_LOCKED_PASS);
+        FLD_SET(evict->walk_session->lock_flags, WT_SESSION_LOCKED_PASS);
         ret = __evict_server(session, &did_work);
         FLD_CLR(evict->walk_session->lock_flags, WT_SESSION_LOCKED_PASS);
         FLD_CLR(session->lock_flags, WT_SESSION_LOCKED_PASS);
@@ -688,7 +684,7 @@ __evict_update_work(WT_SESSION_IMPL *session, bool *eviction_needed)
     target = evict->eviction_target;
     trigger = evict->eviction_trigger;
     updates_target = evict->eviction_updates_target;
-    updates_trigger = evict->eviction_updates_trigger;
+    updates_trigger = __wt_atomic_load_double_relaxed(&evict->eviction_updates_trigger);
 
     /* Build up the new state. */
     flags = 0;
@@ -1457,23 +1453,19 @@ __evict_lru_walk(WT_SESSION_IMPL *session)
         --evict->evict_empty_score;
 
     /* Fill the next queue (that isn't the urgent queue). */
-    queue = evict->evict_fill_queue; //Set the current to the next queue to fill
+    queue = evict->evict_fill_queue;
     other_queue = evict->evict_queues + (1 - (queue - evict->evict_queues));
-    evict->evict_fill_queue = other_queue; //Set the next fill queue to the other queue
+    evict->evict_fill_queue = other_queue;
 
     /* If this queue is full, try the other one. */
     if (__evict_queue_full(queue) && !__evict_queue_full(other_queue))
-        queue = other_queue; /* Select the unempty queue */
+        queue = other_queue;
 
-    /*
-     * If both queues are full and haven't been empty on recent refills, we're done.
-     * What if queue is full while evict->evict_empty_score >= WT_EVICT_SCORE_CUTOFF?
-     */
+    /* If both queues are full and haven't been empty on recent refills, we're done. */
     if (__evict_queue_full(queue) && evict->evict_empty_score < WT_EVICT_SCORE_CUTOFF) {
         WT_STAT_CONN_INCR(session, eviction_queue_not_empty);
         goto err;
     }
-
     /*
      * If the queue we are filling is empty, pages are being requested faster than they are being
      * queued.
@@ -1483,8 +1475,10 @@ __evict_lru_walk(WT_SESSION_IMPL *session)
             evict->evict_empty_score =
               WT_MIN(evict->evict_empty_score + WT_EVICT_SCORE_BUMP, WT_EVICT_SCORE_MAX);
         WT_STAT_CONN_INCR(session, eviction_queue_empty);
-    } else
+    } else {
         WT_STAT_CONN_INCR(session, eviction_queue_not_empty);
+        WT_STAT_CONN_INCRV(session, eviction_pages_remaining_in_queue, queue->evict_candidates);
+    }
 
     /*
      * Get some more pages to consider for eviction.
@@ -1664,8 +1658,10 @@ __evict_walk_choose_dhandle(WT_SESSION_IMPL *session, WT_DATA_HANDLE **dhandle_p
     dhandle = *dhandle_p;
     if (dhandle != NULL)
         dhandle = TAILQ_NEXT(dhandle, q);
-    if (dhandle == NULL)
+    if (dhandle == NULL) {
         dhandle = TAILQ_FIRST(&conn->dhqh);
+        WT_STAT_CONN_INCR(session, eviction_dhandle_complete_walk);
+    }
 
     WT_UNUSED(dh_bucket_count);
     WT_UNUSED(rnd_bucket);
@@ -1755,14 +1751,8 @@ __evict_walk(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue)
 
     /*
      * Set the starting slot in the queue and the maximum pages added per walk.
-     * queue->evict_entries, is the previous position in the queue already filled,
-     * also is the start position for this walk.
      */
     start_slot = slot = queue->evict_entries;
-
-    /* evict->evict_slots is the maximum number of slots in the eviction queue
-     * = WTI_EVICT_WALK_BASE + WTI_EVICT_WALK_INCR = 300+100 = 400
-     */
     max_entries = WT_MIN(slot + WTI_EVICT_WALK_INCR, evict->evict_slots);
 
     /*
@@ -1772,27 +1762,10 @@ __evict_walk(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue)
     total_candidates = (u_int)(F_ISSET(evict, WT_EVICT_CACHE_CLEAN | WT_EVICT_CACHE_UPDATES) ?
         __wt_cache_pages_inuse(cache) :
         __wt_atomic_load_uint64_relaxed(&cache->pages_dirty_leaf));
-
-    /* Note: The variable name 'max_entries' is misleading—it actually represents the
-    * farthest position in the queue that can be filled during this walk starting
-    * from 'slot'. Therefore, the actual maximum number of pages that can be filled
-    * is 'max_entries - slot'.
-    *
-    * When a previous walk obtained a larger 'slot' value, the current walk becomes
-    * less likely to queue pages. For example:
-    * - Previous walk: slot = 300, total_candidates = 500
-    * - max_entries = 1 + 500 / 2 = 251
-    * - Queueable pages: 251 - 300 = -49 (negative!)
-    *
-    * To prevent this bug, we cap 'max_entries' to avoid negative values like this:
-    * max_entries = WT_MIN(max_entries, slot+1 + total_candidates / 2); 
-    * Otherwise, since slot = 300 > 251, the following loop will not execute. 
-    */
     max_entries = WT_MIN(max_entries, 1 + total_candidates / 2);
 
 retry:
     loop_count = 0;
-    /* This will not hit as the above mentioned comment */
     while (slot < max_entries && loop_count++ < conn->dhandle_count) {
         /* We're done if shutting down or reconfiguring. */
         if (F_ISSET_ATOMIC_32(conn, WT_CONN_CLOSING))
@@ -1863,13 +1836,7 @@ retry:
             continue;
         }
 
-        /* Skip files that are checkpointing when only looking for dirty pages
-         * (WT_EVICT_CACHE_CLEAN and WT_EVICT_CACHE_UPDATES are not set).
-         * Checkpoint will handle flushing dirty pages to disk; skip eviction to avoid
-         * contention.If WT_EVICT_CACHE_CLEAN and WT_EVICT_CACHE_DIRTY are both set,
-         * we are looking for all pages, so do not skip checkpointing trees, in which case
-         * how to avoid contention?
-         */
+        /* Skip files that are checkpointing if we are only looking for dirty pages. */
         if (WT_BTREE_SYNCING(btree) &&
           !F_ISSET(evict, WT_EVICT_CACHE_CLEAN | WT_EVICT_CACHE_UPDATES)) {
             WT_STAT_CONN_INCR(session, eviction_server_skip_checkpointing_trees);
@@ -1878,7 +1845,7 @@ retry:
         }
 
         /*
-         * Skip files(currently only one case of metadata) that are configured to stick in cache until we become aggressive.
+         * Skip files that are configured to stick in cache until we become aggressive.
          *
          * If the file is contributing heavily to our cache usage then ignore the "stickiness" of
          * its pages.
@@ -2174,9 +2141,7 @@ __evict_skip_dirty_candidate(WT_SESSION_IMPL *session, WT_PAGE *page)
                 return (true);
             }
         } else {
-            wt_timestamp_t pinned_stable_ts;
-            __wt_txn_pinned_stable_timestamp(session, &pinned_stable_ts);
-            if (newest_commit_timestamp > pinned_stable_ts) {
+            if (newest_commit_timestamp > __wt_txn_pinned_stable_timestamp(session)) {
                 WT_STAT_CONN_INCR(session, eviction_server_skip_pages_checkpoint_timestamp);
                 return (true);
             }
@@ -2210,7 +2175,8 @@ __evict_skip_dirty_candidate(WT_SESSION_IMPL *session, WT_PAGE *page)
         if (!high_pressure && F_ISSET(conn->evict, WT_EVICT_CACHE_UPDATES)) {
             WT_IGNORE_RET(__wti_evict_updates_needed(session, &pct_updates));
             high_pressure = (pct_updates >
-              (conn->evict->eviction_updates_trigger * WT_DIRTY_PAGE_LOW_PRESSURE_THRESHOLD));
+              (__wt_atomic_load_double_relaxed(&conn->evict->eviction_updates_trigger) *
+                WT_DIRTY_PAGE_LOW_PRESSURE_THRESHOLD));
         }
 
         if (!high_pressure)
@@ -2221,7 +2187,7 @@ __evict_skip_dirty_candidate(WT_SESSION_IMPL *session, WT_PAGE *page)
 
 /*
  * __evict_get_target_pages --
- *     Calculate theoritically the maximum number of target pages to add to the queue.
+ *     Calculate the target pages to add to the queue.
  */
 static WT_INLINE uint32_t
 __evict_get_target_pages(WT_SESSION_IMPL *session, u_int max_entries, uint32_t slot)
@@ -2246,8 +2212,8 @@ __evict_get_target_pages(WT_SESSION_IMPL *session, u_int max_entries, uint32_t s
     target_pages = __evict_walk_target(session);
 
     if ((target_pages == 0) || btree->evict_walk_progress >= btree->evict_walk_target) {
-        btree->evict_walk_target = target_pages; /* the target pages should be queued */
-        btree->evict_walk_progress = 0;          /* the number pages already queued */
+        btree->evict_walk_target = target_pages;
+        btree->evict_walk_progress = 0;
     }
     target_pages = btree->evict_walk_target - btree->evict_walk_progress;
 
@@ -2640,8 +2606,7 @@ fast:
 
 /*
  * __evict_walk_tree --
- *     Get a few page eviction candidates from a single underlying file. slotp : when input, its the
- *     starting slot to fill in the queue; when output, it's the number of slots filled.
+ *     Get a few page eviction candidates from a single underlying file.
  */
 static int
 __evict_walk_tree(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue, u_int max_entries, u_int *slotp)
@@ -3107,7 +3072,6 @@ __evict_page(WT_SESSION_IMPL *session, bool is_server)
 
     WT_WITH_BTREE(session, btree, ret = __wt_evict(session, ref, previous_state, flags));
 
-    /* Decrement the busy count in the btree handle that is incremented in __evict_get_ref. */
     (void)__wt_atomic_sub_uint32_v(&btree->evict_busy, 1);
 
     if (time_start != 0) {
