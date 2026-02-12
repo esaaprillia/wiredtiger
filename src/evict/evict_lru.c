@@ -3107,6 +3107,7 @@ __evict_page(WT_SESSION_IMPL *session, bool is_server)
 
     WT_WITH_BTREE(session, btree, ret = __wt_evict(session, ref, previous_state, flags));
 
+    /* Decrement the busy count in the btree handle that is incremented in __evict_get_ref. */
     (void)__wt_atomic_sub_uint32_v(&btree->evict_busy, 1);
 
     if (time_start != 0) {
