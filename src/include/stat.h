@@ -593,6 +593,12 @@ struct __wt_connection_stats {
     int64_t eviction_slow;
     int64_t eviction_walk_leaf_notfound;
     int64_t eviction_state;
+    int64_t eviction_threshold_cache_full_target;
+    int64_t eviction_threshold_cache_full_trigger;
+    int64_t eviction_threshold_dirty_target;
+    int64_t eviction_threshold_dirty_trigger;
+    int64_t eviction_threshold_updates_target;
+    int64_t eviction_threshold_updates_trigger;
     int64_t eviction_walk_sleeps;
     int64_t cache_eviction_pages_queued_updates;
     int64_t cache_eviction_pages_queued_clean;
@@ -1229,6 +1235,7 @@ struct __wt_connection_stats {
     int64_t rec_page_mods_gt500;
     int64_t rec_hs_wrapup_next_prev_calls;
     int64_t rec_page_delete_fast;
+    int64_t rec_free_page_id_due_to_failed_replacement_reconciliation;
     int64_t rec_page_full_image_internal;
     int64_t rec_page_full_image_leaf;
     int64_t rec_page_delta_internal_key_deleted;
@@ -1727,6 +1734,7 @@ struct __wt_dsrc_stats {
     int64_t rec_hs_wrapup_next_prev_calls;
     int64_t rec_dictionary;
     int64_t rec_page_delete_fast;
+    int64_t rec_free_page_id_due_to_failed_replacement_reconciliation;
     int64_t rec_page_full_image_internal;
     int64_t rec_page_full_image_leaf;
     int64_t rec_page_delta_internal_key_deleted;
