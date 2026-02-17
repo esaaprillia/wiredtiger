@@ -3143,20 +3143,20 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->cache_eviction_blocked_disagg_next_checkpoint = 0;
     stats->cache_eviction_deepen = 0;
     stats->cache_write_hs = 0;
-    stats->page_cache_average_op_time = 0;
-    stats->page_cache_hash_size = 0;
-    stats->page_cache_hit = 0;
-    stats->page_cache_max_bucket_size = 0;
-    stats->page_cache_max_get_time = 0;
-    stats->page_cache_max_page_ref_count = 0;
-    stats->page_cache_max_put_time = 0;
-    stats->page_cache_max_release_time = 0;
-    stats->page_cache_memory_allocated = 0;
-    stats->page_cache_miss = 0;
-    stats->page_cache_total_entry_count = 0;
-    stats->page_cache_total_op = 0;
-    stats->page_cache_total_op_time = 0;
-    stats->page_cache_total_page_count = 0;
+    /* not clearing page_cache_average_op_time */
+    /* not clearing page_cache_hash_size */
+    /* not clearing page_cache_hit */
+    /* not clearing page_cache_max_bucket_size */
+    /* not clearing page_cache_max_get_time */
+    /* not clearing page_cache_max_page_ref_count */
+    /* not clearing page_cache_max_put_time */
+    /* not clearing page_cache_max_release_time */
+    /* not clearing page_cache_memory_allocated */
+    /* not clearing page_cache_miss */
+    /* not clearing page_cache_total_entry_count */
+    /* not clearing page_cache_total_op */
+    /* not clearing page_cache_total_op_time */
+    /* not clearing page_cache_total_page_count */
     /* not clearing eviction_consider_prefetch */
     /* not clearing cache_pages_inuse */
     /* not clearing cache_pages_inuse_ingest */
