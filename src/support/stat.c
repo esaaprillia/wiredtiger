@@ -2251,6 +2251,10 @@ static const char *const __stats_connection_desc[] = {
   "checkpoint: fsync duration after allocating the transaction ID (usecs)",
   "checkpoint: generation",
   "checkpoint: leaf pages queued for urgent eviction after multiblock checkpoint split",
+  "checkpoint: leaf pages split inline during checkpoint",
+  "checkpoint: leaf pages that failed to queue for urgent eviction after multiblock checkpoint "
+  "split",
+  "checkpoint: leaf pages that failed to split inline during checkpoint",
   "checkpoint: max time (msecs)",
   "checkpoint: min time (msecs)",
   "checkpoint: most recent duration for checkpoint dropping all handles (usecs)",
@@ -2275,6 +2279,7 @@ static const char *const __stats_connection_desc[] = {
   "checkpoint: number of internal pages visited",
   "checkpoint: number of leaf pages visited",
   "checkpoint: number of pages caused to be reconciled",
+  "checkpoint: pages re-reconciled with an unrealized multiblock checkpoint split",
   "checkpoint: prepare currently running",
   "checkpoint: prepare max time (msecs)",
   "checkpoint: prepare min time (msecs)",
@@ -3305,6 +3310,9 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     /* not clearing checkpoint_fsync_post_duration */
     /* not clearing checkpoint_generation */
     stats->checkpoint_evict_pages_queued_multiblock_split = 0;
+    stats->checkpoint_evict_pages_multiblock_split = 0;
+    stats->checkpoint_evict_pages_queued_multiblock_split_fail = 0;
+    stats->checkpoint_evict_pages_multiblock_split_fail = 0;
     /* not clearing checkpoint_time_max */
     /* not clearing checkpoint_time_min */
     /* not clearing checkpoint_handle_drop_duration */
@@ -3329,6 +3337,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->checkpoint_pages_visited_internal = 0;
     stats->checkpoint_pages_visited_leaf = 0;
     stats->checkpoint_pages_reconciled = 0;
+    stats->checkpoint_evict_pages_unrealized_multiblock_split = 0;
     /* not clearing checkpoint_prep_running */
     /* not clearing checkpoint_prep_max */
     /* not clearing checkpoint_prep_min */
@@ -4455,6 +4464,12 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->checkpoint_generation += WT_STAT_CONN_READ(from, checkpoint_generation);
     to->checkpoint_evict_pages_queued_multiblock_split +=
       WT_STAT_CONN_READ(from, checkpoint_evict_pages_queued_multiblock_split);
+    to->checkpoint_evict_pages_multiblock_split +=
+      WT_STAT_CONN_READ(from, checkpoint_evict_pages_multiblock_split);
+    to->checkpoint_evict_pages_queued_multiblock_split_fail +=
+      WT_STAT_CONN_READ(from, checkpoint_evict_pages_queued_multiblock_split_fail);
+    to->checkpoint_evict_pages_multiblock_split_fail +=
+      WT_STAT_CONN_READ(from, checkpoint_evict_pages_multiblock_split_fail);
     to->checkpoint_time_max += WT_STAT_CONN_READ(from, checkpoint_time_max);
     to->checkpoint_time_min += WT_STAT_CONN_READ(from, checkpoint_time_min);
     to->checkpoint_handle_drop_duration += WT_STAT_CONN_READ(from, checkpoint_handle_drop_duration);
@@ -4483,6 +4498,8 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
       WT_STAT_CONN_READ(from, checkpoint_pages_visited_internal);
     to->checkpoint_pages_visited_leaf += WT_STAT_CONN_READ(from, checkpoint_pages_visited_leaf);
     to->checkpoint_pages_reconciled += WT_STAT_CONN_READ(from, checkpoint_pages_reconciled);
+    to->checkpoint_evict_pages_unrealized_multiblock_split +=
+      WT_STAT_CONN_READ(from, checkpoint_evict_pages_unrealized_multiblock_split);
     to->checkpoint_prep_running += WT_STAT_CONN_READ(from, checkpoint_prep_running);
     to->checkpoint_prep_max += WT_STAT_CONN_READ(from, checkpoint_prep_max);
     to->checkpoint_prep_min += WT_STAT_CONN_READ(from, checkpoint_prep_min);

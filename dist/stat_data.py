@@ -498,7 +498,11 @@ conn_stats = [
     # Checkpoint statistics
     ##########################################
     CheckpointStat('checkpoint_cleanup_success', 'checkpoint cleanup successful calls'),
+    CheckpointStat('checkpoint_evict_pages_multiblock_split', 'leaf pages split inline during checkpoint'),
+    CheckpointStat('checkpoint_evict_pages_multiblock_split_fail', 'leaf pages that failed to split inline during checkpoint'),
     CheckpointStat('checkpoint_evict_pages_queued_multiblock_split', 'leaf pages queued for urgent eviction after multiblock checkpoint split'),
+    CheckpointStat('checkpoint_evict_pages_queued_multiblock_split_fail', 'leaf pages that failed to queue for urgent eviction after multiblock checkpoint split'),
+    CheckpointStat('checkpoint_evict_pages_unrealized_multiblock_split', 'pages re-reconciled with an unrealized multiblock checkpoint split'),
     CheckpointStat('checkpoint_fsync_post', 'fsync calls after allocating the transaction ID'),
     CheckpointStat('checkpoint_fsync_post_duration', 'fsync duration after allocating the transaction ID (usecs)', 'no_clear,no_scale'),
     CheckpointStat('checkpoint_generation', 'generation', 'no_clear,no_scale'),

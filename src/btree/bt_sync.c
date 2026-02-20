@@ -370,21 +370,55 @@ __wt_sync_file(WT_SESSION_IMPL *session, WT_CACHE_OP syncop)
 
             /*
              * If checkpoint reconciliation split a leaf page into multiple blocks and the page is
-             * now clean, queue it for urgent eviction to materialize the split in the in-memory
-             * tree. This avoids a costly re-reconciliation later: without this, a small subsequent
-             * modification would dirty the unsplit page and force eviction to repeat the expensive
-             * multi-block reconciliation with a near-identical result.
+             * now clean, materialize the split to avoid a costly re-reconciliation later. Without
+             * this, a small subsequent modification would dirty the unsplit page and force eviction
+             * to repeat the expensive multi-block reconciliation with a near-identical result.
              *
-             * The eviction worker handles this cheaply -- no reconciliation is needed, it just
-             * restructures the tree using the blocks already written by this checkpoint.
+             * Two strategies are available, controlled by the boolean below:
+             *
+             * Synchronous (true): evict the page inline via __wt_page_release_evict using the same
+             * walk-resume pattern as the checkpoint eviction stress test. This guarantees the split
+             * is materialized before checkpoint moves on, but adds latency to the checkpoint walk.
+             * Must be skipped during shutdown/recovery as the split dirties the parent and marks
+             * the tree modified, which is not permitted in those contexts.
+             *
+             * Asynchronous (false): queue the page to the urgent eviction queue for an eviction
+             * worker to pick up. Zero checkpoint latency cost, but the page may be dirtied before
+             * the worker gets to it (harmless -- the eviction attempt returns EBUSY and the page
+             * stays in cache).
              */
-            if (!is_internal && !__wt_page_is_modified(page) &&
+#define WT_CHECKPOINT_SPLIT_ENABLED true
+#define WT_CHECKPOINT_SPLIT_INLINE false
+            if (WT_CHECKPOINT_SPLIT_ENABLED && !is_internal &&
+              !__wt_page_is_modified(page) &&
               page->modify != NULL &&
               page->modify->rec_result == WT_PM_REC_MULTIBLOCK &&
               page->modify->mod_multi_entries > 1) {
-                WT_STAT_CONN_INCR(
-                  session, checkpoint_evict_pages_queued_multiblock_split);
-                WT_IGNORE_RET(__wt_evict_page_urgent(session, walk));
+                if (WT_CHECKPOINT_SPLIT_INLINE) {
+                    if (!F_ISSET(conn, WT_CONN_RECOVERING) &&
+                      !F_ISSET_ATOMIC_32(conn, WT_CONN_CLOSING_CHECKPOINT)) {
+                        ret = __wt_page_release_evict(session, walk, 0);
+                        walk = NULL;
+                        if (ret == 0)
+                            WT_STAT_CONN_INCR(
+                              session, checkpoint_evict_pages_multiblock_split);
+                        else
+                            WT_STAT_CONN_INCR(session,
+                              checkpoint_evict_pages_multiblock_split_fail);
+                        WT_ERR_ERROR_OK(ret, EBUSY, false);
+
+                        walk = prev;
+                        prev = NULL;
+                        continue;
+                    }
+                } else {
+                    if (__wt_evict_page_urgent(session, walk))
+                        WT_STAT_CONN_INCR(session,
+                          checkpoint_evict_pages_queued_multiblock_split);
+                    else
+                        WT_STAT_CONN_INCR(session,
+                          checkpoint_evict_pages_queued_multiblock_split_fail);
+                }
             }
 
             /* Update checkpoint IO tracking data. */
