@@ -803,6 +803,9 @@ struct __wt_connection_stats {
     int64_t checkpoint_fsync_post_duration;
     int64_t checkpoint_generation;
     int64_t checkpoint_evict_pages_queued_multiblock_split;
+    int64_t checkpoint_evict_pages_multiblock_split;
+    int64_t checkpoint_evict_pages_queued_multiblock_split_fail;
+    int64_t checkpoint_evict_pages_multiblock_split_fail;
     int64_t checkpoint_time_max;
     int64_t checkpoint_time_min;
     int64_t checkpoint_handle_drop_duration;
@@ -829,6 +832,7 @@ struct __wt_connection_stats {
     int64_t checkpoint_pages_reconciled;
     int64_t checkpoint_cleanup_pages_evict;
     int64_t checkpoint_cleanup_pages_obsolete_tw;
+    int64_t checkpoint_evict_pages_unrealized_multiblock_split;
     int64_t checkpoint_cleanup_pages_read_reclaim_space;
     int64_t checkpoint_cleanup_pages_read_obsolete_tw;
     int64_t checkpoint_cleanup_pages_removed;

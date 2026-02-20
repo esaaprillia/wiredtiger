@@ -295,6 +295,10 @@ __reconcile(WT_SESSION_IMPL *session, WT_REF *ref, WT_SALVAGE_COOKIE *salvage, u
         WT_WITH_PAGE_INDEX(session, ret = __wti_rec_col_int(session, r, ref));
         break;
     case WT_PAGE_COL_VAR:
+        if (page->modify->rec_result == WT_PM_REC_MULTIBLOCK) {
+            WT_STAT_CONN_INCR(
+              session, checkpoint_evict_pages_unrealized_multiblock_split);
+        }
         ret = __wti_rec_col_var(session, r, ref, salvage);
         break;
     case WT_PAGE_ROW_INT:
@@ -306,6 +310,10 @@ __reconcile(WT_SESSION_IMPL *session, WT_REF *ref, WT_SALVAGE_COOKIE *salvage, u
          * pointing into the internal page's memory. We want to prevent eviction of the internal
          * page for the duration.
          */
+        if (page->modify->rec_result == WT_PM_REC_MULTIBLOCK) {
+            WT_STAT_CONN_INCR(
+              session, checkpoint_evict_pages_unrealized_multiblock_split);
+        }
         WT_WITH_PAGE_INDEX(session, ret = __wti_rec_row_leaf(session, r, ref, salvage));
         break;
     default:
