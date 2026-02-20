@@ -368,6 +368,25 @@ __wt_sync_file(WT_SESSION_IMPL *session, WT_CACHE_OP syncop)
 
             WT_ERR(__wt_reconcile(session, walk, NULL, rec_flags));
 
+            /*
+             * If checkpoint reconciliation split a leaf page into multiple blocks and the page is
+             * now clean, queue it for urgent eviction to materialize the split in the in-memory
+             * tree. This avoids a costly re-reconciliation later: without this, a small subsequent
+             * modification would dirty the unsplit page and force eviction to repeat the expensive
+             * multi-block reconciliation with a near-identical result.
+             *
+             * The eviction worker handles this cheaply -- no reconciliation is needed, it just
+             * restructures the tree using the blocks already written by this checkpoint.
+             */
+            if (!is_internal && !__wt_page_is_modified(page) &&
+              page->modify != NULL &&
+              page->modify->rec_result == WT_PM_REC_MULTIBLOCK &&
+              page->modify->mod_multi_entries > 1) {
+                WT_STAT_CONN_INCR(
+                  session, checkpoint_evict_pages_queued_multiblock_split);
+                WT_IGNORE_RET(__wt_evict_page_urgent(session, walk));
+            }
+
             /* Update checkpoint IO tracking data. */
             if (__wt_checkpoint_verbose_timer_started(session))
                 __wt_checkpoint_progress_stats(
