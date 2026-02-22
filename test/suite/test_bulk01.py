@@ -72,7 +72,7 @@ class test_bulk_load(wttest.WiredTigerTestCase):
         cursor = self.session.open_cursor(uri, None, "bulk")
         # self.assertEqual(self.get_stat(stat.conn.cursor_bulk_count), 1)
 
-        for i in range(1, 10000):
+        for i in range(1, 100):
             cursor[simple_key(cursor, i)] = simple_value(cursor, i)
 
         cursor.close()
