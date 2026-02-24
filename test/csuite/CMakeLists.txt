@@ -381,3 +381,11 @@ define_c_test(
     ARGUMENTS
     DEPENDS "WT_POSIX"
 )
+
+define_c_test(
+    TARGET test_wt_sweep_mmap_null_bm
+    SOURCES wt_sweep_mmap_null_bm/main.c
+    DIR_NAME wt_sweep_mmap_null_bm
+    ARGUMENTS
+    DEPENDS "WT_POSIX"
+)
