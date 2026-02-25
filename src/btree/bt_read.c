@@ -311,21 +311,21 @@ __page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
 
     /* Should we only enable cross checkpoint caching in disagg? */
     __wt_page_cache_get(session, addr.addr, addr.size, &page_cache_item, &page_cache_found);
-    // if (page_cache_found) {
-    //     __wt_page_cache_release(session, addr.addr, addr.size);
-    //     /* We need an extra enum to avoid page disk being counted as memory usage, also to avoid
-    //      * it's being wrongly freed, the calculation of. dsk size should be done as part of the
-    //      page
-    //      * cache? check how block cache does. */
-    //     page_flags = WT_PAGE_DISK_ALLOC;
-    //     if (LF_ISSET(WT_READ_IGNORE_CACHE_SIZE))
-    //         FLD_SET(page_flags, WT_PAGE_EVICT_NO_PROGRESS);
-    //     if (LF_ISSET(WT_READ_PREFETCH))
-    //         FLD_SET(page_flags, WT_PAGE_PREFETCH);
-    //     WT_ERR(__wti_page_inmem(
-    //       session, ref, page_cache_item->data, page_flags, &page, &instantiate_upd));
-    //     goto skip_blkcache_read;
-    // }
+    /*We need an extra enum to avoid page disk being counted as memory usage, also to avoid
+         it's being wrongly freed, the calculation of. dsk size should be done as part of the
+         page
+         cache? check how block cache does.
+    if (page_cache_found) {
+        __wt_page_cache_release(session, addr.addr, addr.size);
+        page_flags = WT_PAGE_DISK_alloc;
+        if (LF_ISSET(WT_READ_IGNORE_CACHE_SIZE))
+            FLD_SET(page_flags, WT_PAGE_EVICT_NO_PROGRESS);
+        if (LF_ISSET(WT_READ_PREFETCH))
+            FLD_SET(page_flags, WT_PAGE_PREFETCH);
+        WT_ERR(__wti_page_inmem(
+          session, ref, page_cache_item->data, page_flags, &page, &instantiate_upd));
+        goto skip_blkcache_read;
+    }*/
 
     /* There's an address, read the backing disk page and build an in-memory version of the page. */
     WT_ERR(__wt_blkcache_read_multi(session, &tmp, &count, &block_meta, addr.addr, addr.size));
@@ -413,7 +413,7 @@ __page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
         if (!page_cache_found)
             WT_ERR(__wt_page_cache_put(session, new_image_copy.data, new_image_copy.size,
               &block_meta, addr.addr, addr.size, &page_cache_item));
-        // __wt_page_cache_release(session, addr.addr, addr.size, page_cache_item);
+        /* __wt_page_cache_release(session, addr.addr, addr.size, page_cache_item); */
         /* Pass the newly built full disk image data to build in-memory page information. */
         WT_ERR(__wti_page_inmem(
           session, ref, new_image_copy.data, page_flags, &page, &instantiate_upd, page_cache_item));
@@ -421,7 +421,7 @@ __page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
         if (!page_cache_found)
             WT_ERR(__wt_page_cache_put(session, tmp[0].data, tmp[0].size, &block_meta, addr.addr,
               addr.size, &page_cache_item));
-        //__wt_page_cache_release(session, addr.addr, addr.size, page_cache_item);
+        /*__wt_page_cache_release(session, addr.addr, addr.size, page_cache_item); */
         WT_ERR(__wti_page_inmem(
           session, ref, tmp[0].data, page_flags, &page, &instantiate_upd, page_cache_item));
         WT_ASSERT(session, ref->page == page);
@@ -435,7 +435,7 @@ __page_read(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
 
     __wt_free(session, tmp);
 
-    // skip_blkcache_read:
+    /* skip_blkcache_read: */
     if (!page_change && instantiate_upd && !WT_IS_HS(session->dhandle))
         WT_ERR(__wti_page_inmem_updates(session, ref));
 

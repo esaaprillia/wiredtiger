@@ -343,7 +343,6 @@ conn_stats = [
     CacheStat('cache_write_app_time', 'application threads page write from cache to disk time (usecs)'),
     CacheStat('npos_evict_walk_max', 'eviction walk restored - had to walk this many pages', 'max_aggregate,no_scale'),
     CacheStat('npos_read_walk_max', 'npos read - had to walk this many pages', 'max_aggregate,no_scale'),
-    CacheStat('page_cache_average_op_time', 'page_cache_average_op_time', 'no_clear,no_scale'),
     CacheStat('page_cache_hash_size', 'page_cache_hash_size', 'no_clear,no_scale'),
     CacheStat('page_cache_hit', 'page_cache_hit', 'no_clear,no_scale'),
     CacheStat('page_cache_max_bucket_size', 'page_cache_max_bucket_size', 'no_clear,no_scale'),

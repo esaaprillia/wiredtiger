@@ -156,7 +156,7 @@ __wt_page_out(WT_SESSION_IMPL *session, WT_PAGE **pagep)
     if (page->page_cache_item != NULL) {
         __wt_page_cache_release(session, page->page_cache_item->addr,
           page->page_cache_item->addr_size, page->page_cache_item);
-        // page->page_cache_item = NULL;
+        /* page->page_cache_item = NULL; */
     }
     __wt_overwrite_and_free(session, page);
 }

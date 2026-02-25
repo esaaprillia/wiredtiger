@@ -47,7 +47,7 @@ __wt_cache_config(WT_SESSION_IMPL *session, const char *cfg[], bool reconfig)
     if (!now_shared) {
         WT_RET(__wt_config_gets(session, cfg, "cache_size", &cval));
         /* Use 5% of cache size as spare cache for the page cache table. */
-        // conn->cache_size = (uint64_t)cval.val / 20 * 19;
+        /* conn->cache_size = (uint64_t)cval.val / 20 * 19; */
         conn->cache_size = (uint64_t)cval.val;
     }
     /* Set config values as percentages. */
