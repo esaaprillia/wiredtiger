@@ -295,10 +295,6 @@ __reconcile(WT_SESSION_IMPL *session, WT_REF *ref, WT_SALVAGE_COOKIE *salvage, u
         WT_WITH_PAGE_INDEX(session, ret = __wti_rec_col_int(session, r, ref));
         break;
     case WT_PAGE_COL_VAR:
-        if (page->modify->rec_result == WT_PM_REC_MULTIBLOCK) {
-            WT_STAT_CONN_INCR(
-              session, checkpoint_evict_pages_unrealized_multiblock_split);
-        }
         ret = __wti_rec_col_var(session, r, ref, salvage);
         break;
     case WT_PAGE_ROW_INT:
@@ -311,8 +307,12 @@ __reconcile(WT_SESSION_IMPL *session, WT_REF *ref, WT_SALVAGE_COOKIE *salvage, u
          * page for the duration.
          */
         if (page->modify->rec_result == WT_PM_REC_MULTIBLOCK) {
-            WT_STAT_CONN_INCR(
-              session, checkpoint_evict_pages_unrealized_multiblock_split);
+            WT_STAT_CONN_INCR(session, rec_multiblock_unrealized_split_re_reconcile_total);
+            if (F_ISSET(r, WT_REC_EVICT)) {
+                WT_STAT_CONN_INCR(session, rec_multiblock_unrealized_split_re_reconcile_eviction);
+            } else if (F_ISSET(r, WT_REC_CHECKPOINT)) {
+                WT_STAT_CONN_INCR(session, rec_multiblock_unrealized_split_re_reconcile_checkpoint);
+            }
         }
         WT_WITH_PAGE_INDEX(session, ret = __wti_rec_row_leaf(session, r, ref, salvage));
         break;

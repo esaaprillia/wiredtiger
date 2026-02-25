@@ -319,13 +319,15 @@ __wt_evict(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE previous_state, u
     WT_PAGE *page;
     uint64_t page_size;
     uint8_t stats_flags;
-    bool clean_page, closing, ebusy_only, inmem_split, is_dirty, tree_dead;
+    bool checkpoint_split, clean_page, closing, ebusy_only, exclusive_acquired;
+    bool inmem_split, is_dirty, tree_dead;
 
     conn = S2C(session);
     page = ref->page;
     closing = LF_ISSET(WT_EVICT_CALL_CLOSING);
     stats_flags = 0;
-    clean_page = ebusy_only = is_dirty = false;
+    checkpoint_split = F_ISSET_ATOMIC_16(page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT);
+    clean_page = ebusy_only = exclusive_acquired = is_dirty = false;
 
     __wt_verbose_debug3(
       session, WT_VERB_EVICTION, "page %p (%s)", (void *)page, __wt_page_type_string(page->type));
@@ -373,6 +375,7 @@ __wt_evict(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE previous_state, u
      */
     if (!closing) {
         WT_ERR(__evict_exclusive(session, ref));
+        exclusive_acquired = true;
 
         /*
          * Now the page is locked, remove it from the LRU eviction queue. We have to do this before
@@ -479,6 +482,17 @@ err:
         __wt_atomic_stats_max_uint16(
           &conn->evict->evict_max_evict_page_attempts, page->evict_page_attempts);
 
+        if (checkpoint_split) {
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected);
+            WT_STAT_CONN_SET(session, rec_multiblock_checkpoint_evict_fail_last_error, ret);
+            if (!exclusive_acquired)
+                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected_exclusive);
+            else if (!ebusy_only)
+                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected_review);
+            else
+                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected_update);
+        }
+
         if (!closing)
             __evict_exclusive_clear(session, ref, previous_state);
 
@@ -487,6 +501,8 @@ err:
     }
 
 done:
+    if (checkpoint_split)
+        F_CLR_ATOMIC_16(page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT);
     if (ret == 0)
         FLD_SET(stats_flags, WT_EVICT_STATS_SUCCESS);
     __evict_stats_update(session, stats_flags);
@@ -985,7 +1001,7 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
     WT_DECL_RET;
     WT_PAGE *page;
     wt_timestamp_t checkpoint_timestamp;
-    bool closing, modified;
+    bool checkpoint_split, closing, modified;
 
     *inmem_splitp = false;
 
@@ -993,6 +1009,7 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
     conn = S2C(session);
     page = ref->page;
     closing = FLD_ISSET(evict_flags, WT_EVICT_CALL_CLOSING);
+    checkpoint_split = F_ISSET_ATOMIC_16(page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT);
 
     /*
      * Fail if an internal has active children, the children must be evicted first. The test is
@@ -1025,8 +1042,11 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
      * Clean pages can't be evicted from in memory btrees. This should be uncommon - we don't add
      * clean pages to the queue.
      */
-    if (F_ISSET(btree, WT_BTREE_IN_MEMORY) && !modified && !closing)
+    if (F_ISSET(btree, WT_BTREE_IN_MEMORY) && !modified && !closing) {
+        if (checkpoint_split)
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_review_inmemory);
         return (__wt_set_return(session, EBUSY));
+    }
 
     /* Check if the page can be evicted. */
     if (!closing) {
@@ -1036,8 +1056,16 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
         if (modified)
             WT_RET(__wt_txn_update_oldest(session, WT_TXN_OLDEST_STRICT));
 
-        if (!__wt_page_can_evict(session, ref, inmem_splitp))
+        if (!__wt_page_can_evict(session, ref, inmem_splitp)) {
+            if (checkpoint_split) {
+                WT_STAT_CONN_INCR(
+                  session, rec_multiblock_checkpoint_evict_review_cannot_evict);
+                if (modified && __wt_btree_syncing_by_other_session(session))
+                    WT_STAT_CONN_INCR(
+                      session, rec_multiblock_checkpoint_evict_review_blocked_syncing);
+            }
             return (__wt_set_return(session, EBUSY));
+        }
 
         /* Check for an append-only workload needing an in-memory split. */
         if (*inmem_splitp)
@@ -1047,6 +1075,9 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
     /* If the page is clean, we're done and we can evict. */
     if (!modified)
         return (0);
+
+    if (checkpoint_split)
+        WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_review_page_dirty);
 
     /*
      * If we are trying to evict a dirty page that does not belong to history store(HS) and
@@ -1060,6 +1091,8 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
     if (__wt_tsan_suppress_load_bool_v(&conn->txn_global.checkpoint_running_hs) &&
       !WT_IS_HS(btree->dhandle) && __wti_evict_hs_dirty(session) && __wt_cache_full(session)) {
         WT_STAT_CONN_INCR(session, cache_eviction_blocked_checkpoint_hs);
+        if (checkpoint_split)
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_review_hs_dirty);
         return (__wt_set_return(session, EBUSY));
     }
 
@@ -1072,6 +1105,8 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
     if (F_ISSET(conn, WT_CONN_PRECISE_CHECKPOINT) && checkpoint_timestamp != WT_TS_NONE &&
       page->modify->rec_pinned_stable_timestamp >= checkpoint_timestamp) {
         WT_STAT_CONN_INCR(session, cache_eviction_blocked_precise_checkpoint);
+        if (checkpoint_split)
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_review_precise_ckpt);
         return (__wt_set_return(session, EBUSY));
     }
 
@@ -1079,8 +1114,11 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
      * If reconciliation is disabled for this thread (e.g., during an eviction that writes to the
      * history store or reading a checkpoint), give up.
      */
-    if (F_ISSET(session, WT_SESSION_NO_RECONCILE))
+    if (F_ISSET(session, WT_SESSION_NO_RECONCILE)) {
+        if (checkpoint_split)
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_review_no_reconcile);
         return (__wt_set_return(session, EBUSY));
+    }
 
     return (0);
 }
@@ -1253,8 +1291,11 @@ __evict_reconcile(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags)
     else
         ret = __wt_reconcile(session, ref, NULL, flags);
 
-    if (ret != 0)
+    if (ret != 0) {
         WT_STAT_CONN_INCR(session, eviction_fail_in_reconciliation);
+        if (F_ISSET_ATOMIC_16(ref->page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT))
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_review_reconcile_fail);
+    }
 
     if (is_eviction_thread && F_ISSET(session->txn, WT_TXN_HAS_SNAPSHOT))
         __wt_txn_release_snapshot(session);
