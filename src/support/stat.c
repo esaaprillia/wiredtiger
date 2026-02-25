@@ -338,6 +338,7 @@ static const char *const __stats_dsrc_desc[] = {
   "reconciliation: free page ID due to failed page replacement reconciliation in disagg",
   "reconciliation: full internal pages written instead of a page delta",
   "reconciliation: full leaf pages written instead of a page delta",
+  "reconciliation: ingest btree reconciliation keeps the aborted prepare updates",
   "reconciliation: internal page delta keys deleted",
   "reconciliation: internal page delta keys updated/inserted",
   "reconciliation: internal page deltas written",
@@ -773,6 +774,7 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->rec_free_page_id_due_to_failed_replacement_reconciliation = 0;
     stats->rec_page_full_image_internal = 0;
     stats->rec_page_full_image_leaf = 0;
+    stats->rec_ingest_keep_prepare_rollback = 0;
     stats->rec_page_delta_internal_key_deleted = 0;
     stats->rec_page_delta_internal_key_updated = 0;
     stats->rec_page_delta_internal = 0;
@@ -1211,6 +1213,7 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
       from->rec_free_page_id_due_to_failed_replacement_reconciliation;
     to->rec_page_full_image_internal += from->rec_page_full_image_internal;
     to->rec_page_full_image_leaf += from->rec_page_full_image_leaf;
+    to->rec_ingest_keep_prepare_rollback += from->rec_ingest_keep_prepare_rollback;
     to->rec_page_delta_internal_key_deleted += from->rec_page_delta_internal_key_deleted;
     to->rec_page_delta_internal_key_updated += from->rec_page_delta_internal_key_updated;
     to->rec_page_delta_internal += from->rec_page_delta_internal;
@@ -1687,6 +1690,8 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
       WT_STAT_DSRC_READ(from, rec_free_page_id_due_to_failed_replacement_reconciliation);
     to->rec_page_full_image_internal += WT_STAT_DSRC_READ(from, rec_page_full_image_internal);
     to->rec_page_full_image_leaf += WT_STAT_DSRC_READ(from, rec_page_full_image_leaf);
+    to->rec_ingest_keep_prepare_rollback +=
+      WT_STAT_DSRC_READ(from, rec_ingest_keep_prepare_rollback);
     to->rec_page_delta_internal_key_deleted +=
       WT_STAT_DSRC_READ(from, rec_page_delta_internal_key_deleted);
     to->rec_page_delta_internal_key_updated +=
@@ -2098,20 +2103,7 @@ static const char *const __stats_connection_desc[] = {
   "checkpoint",
   "cache: page split during eviction deepened the tree",
   "cache: page written requiring history store records",
-  "cache: page_cache_average_op_time",
-  "cache: page_cache_hash_size",
-  "cache: page_cache_hit",
-  "cache: page_cache_max_bucket_size",
-  "cache: page_cache_max_get_time",
-  "cache: page_cache_max_page_ref_count",
-  "cache: page_cache_max_put_time",
-  "cache: page_cache_max_release_time",
-  "cache: page_cache_memory_allocated",
-  "cache: page_cache_miss",
-  "cache: page_cache_total_entry_count",
-  "cache: page_cache_total_op",
-  "cache: page_cache_total_op_time",
-  "cache: page_cache_total_page_count",
+  "cache: pages already in queue when topping up",
   "cache: pages considered for eviction that were brought in by pre-fetch",
   "cache: pages currently held in the cache",
   "cache: pages currently held in the cache from the ingest btrees",
@@ -2392,6 +2384,7 @@ static const char *const __stats_connection_desc[] = {
   "data-handle: connection sweeps skipped due to checkpoint gathering handles",
   "data-handle: session dhandles swept",
   "data-handle: session sweep attempts",
+  "disagg: database size",
   "disagg: role leader",
   "disagg: step down most recent time (msecs)",
   "disagg: step up most recent time (msecs)",
@@ -2631,6 +2624,7 @@ static const char *const __stats_connection_desc[] = {
   "reconciliation: free page ID due to failed page replacement reconciliation in disagg",
   "reconciliation: full internal pages written instead of a page delta",
   "reconciliation: full leaf pages written instead of a page delta",
+  "reconciliation: ingest btree reconciliation keeps the aborted prepare updates",
   "reconciliation: internal page delta keys deleted",
   "reconciliation: internal page delta keys updated/inserted",
   "reconciliation: internal page deltas written",
@@ -2748,6 +2742,8 @@ static const char *const __stats_connection_desc[] = {
   "thread-yield: page reconciliation yielded due to child modification",
   "thread-yield: page split and restart read",
   "thread-yield: pages skipped during read due to deleted state",
+  "transaction:  transaction global checkpoint timestamp",
+  "transaction:  transaction global durable timestamp",
   "transaction: Number of prepared updates",
   "transaction: Number of prepared updates committed",
   "transaction: Number of prepared updates repeated on the same key",
@@ -2803,6 +2799,13 @@ static const char *const __stats_connection_desc[] = {
   "transaction: set timestamp stable updates",
   "transaction: transaction begins",
   "transaction: transaction checkpoint history store file duration (usecs)",
+  "transaction: transaction global last running timestamp",
+  "transaction: transaction global newest timestamp",
+  "transaction: transaction global oldest timestamp",
+  "transaction: transaction global pinned timestamp",
+  "transaction: transaction global stable timestamp",
+  "transaction: transaction global version cursor timestamp",
+  "transaction: transaction number of older readers older than oldest timestamp",
   "transaction: transaction range of IDs currently pinned",
   "transaction: transaction range of IDs currently pinned by a checkpoint",
   "transaction: transaction range of timestamps currently pinned",
@@ -3143,20 +3146,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->cache_eviction_blocked_disagg_next_checkpoint = 0;
     stats->cache_eviction_deepen = 0;
     stats->cache_write_hs = 0;
-    /* not clearing page_cache_average_op_time */
-    /* not clearing page_cache_hash_size */
-    /* not clearing page_cache_hit */
-    /* not clearing page_cache_max_bucket_size */
-    /* not clearing page_cache_max_get_time */
-    /* not clearing page_cache_max_page_ref_count */
-    /* not clearing page_cache_max_put_time */
-    /* not clearing page_cache_max_release_time */
-    /* not clearing page_cache_memory_allocated */
-    /* not clearing page_cache_miss */
-    /* not clearing page_cache_total_entry_count */
-    /* not clearing page_cache_total_op */
-    /* not clearing page_cache_total_op_time */
-    /* not clearing page_cache_total_page_count */
+    stats->eviction_pages_remaining_in_queue = 0;
     /* not clearing eviction_consider_prefetch */
     /* not clearing cache_pages_inuse */
     /* not clearing cache_pages_inuse_ingest */
@@ -3432,6 +3422,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->dh_sweep_skip_ckpt = 0;
     stats->dh_session_handles = 0;
     stats->dh_session_sweeps = 0;
+    stats->disagg_database_size = 0;
     stats->disagg_role_leader = 0;
     stats->disagg_step_down_time = 0;
     stats->disagg_step_up_time = 0;
@@ -3671,6 +3662,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->rec_free_page_id_due_to_failed_replacement_reconciliation = 0;
     stats->rec_page_full_image_internal = 0;
     stats->rec_page_full_image_leaf = 0;
+    stats->rec_ingest_keep_prepare_rollback = 0;
     stats->rec_page_delta_internal_key_deleted = 0;
     stats->rec_page_delta_internal_key_updated = 0;
     stats->rec_page_delta_internal = 0;
@@ -3784,6 +3776,8 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->child_modify_blocked_page = 0;
     stats->page_split_restart = 0;
     stats->page_read_skip_deleted = 0;
+    /* not clearing txn_global_checkpoint_timestamp */
+    /* not clearing txn_global_durable_timestamp */
     stats->txn_prepared_updates = 0;
     stats->txn_prepared_updates_committed = 0;
     stats->txn_prepared_updates_key_repeated = 0;
@@ -3833,11 +3827,18 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->txn_set_ts_stable_upd = 0;
     stats->txn_begin = 0;
     stats->txn_hs_ckpt_duration = 0;
+    /* not clearing txn_global_last_running_timestamp */
+    /* not clearing txn_global_newest_timestamp */
+    /* not clearing txn_global_oldest_timestamp */
+    /* not clearing txn_global_pinned_timestamp */
+    /* not clearing txn_global_stable_timestamp */
+    /* not clearing txn_global_version_cursor_timestamp */
+    /* not clearing txn_pinned_readers */
     /* not clearing txn_pinned_range */
     /* not clearing txn_pinned_checkpoint_range */
-    /* not clearing txn_pinned_timestamp */
-    /* not clearing txn_pinned_timestamp_checkpoint */
-    /* not clearing txn_pinned_timestamp_reader */
+    /* not clearing txn_pinned_timestamp_lag */
+    /* not clearing txn_pinned_timestamp_checkpoint_lag */
+    /* not clearing txn_pinned_timestamp_reader_lag */
     /* not clearing txn_pinned_timestamp_oldest */
     /* not clearing txn_timestamp_oldest_active_read */
     /* not clearing txn_rollback_to_stable_running */
@@ -4256,20 +4257,8 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
       WT_STAT_CONN_READ(from, cache_eviction_blocked_disagg_next_checkpoint);
     to->cache_eviction_deepen += WT_STAT_CONN_READ(from, cache_eviction_deepen);
     to->cache_write_hs += WT_STAT_CONN_READ(from, cache_write_hs);
-    to->page_cache_average_op_time += WT_STAT_CONN_READ(from, page_cache_average_op_time);
-    to->page_cache_hash_size += WT_STAT_CONN_READ(from, page_cache_hash_size);
-    to->page_cache_hit += WT_STAT_CONN_READ(from, page_cache_hit);
-    to->page_cache_max_bucket_size += WT_STAT_CONN_READ(from, page_cache_max_bucket_size);
-    to->page_cache_max_get_time += WT_STAT_CONN_READ(from, page_cache_max_get_time);
-    to->page_cache_max_page_ref_count += WT_STAT_CONN_READ(from, page_cache_max_page_ref_count);
-    to->page_cache_max_put_time += WT_STAT_CONN_READ(from, page_cache_max_put_time);
-    to->page_cache_max_release_time += WT_STAT_CONN_READ(from, page_cache_max_release_time);
-    to->page_cache_memory_allocated += WT_STAT_CONN_READ(from, page_cache_memory_allocated);
-    to->page_cache_miss += WT_STAT_CONN_READ(from, page_cache_miss);
-    to->page_cache_total_entry_count += WT_STAT_CONN_READ(from, page_cache_total_entry_count);
-    to->page_cache_total_op += WT_STAT_CONN_READ(from, page_cache_total_op);
-    to->page_cache_total_op_time += WT_STAT_CONN_READ(from, page_cache_total_op_time);
-    to->page_cache_total_page_count += WT_STAT_CONN_READ(from, page_cache_total_page_count);
+    to->eviction_pages_remaining_in_queue +=
+      WT_STAT_CONN_READ(from, eviction_pages_remaining_in_queue);
     to->eviction_consider_prefetch += WT_STAT_CONN_READ(from, eviction_consider_prefetch);
     to->cache_pages_inuse += WT_STAT_CONN_READ(from, cache_pages_inuse);
     to->cache_pages_inuse_ingest += WT_STAT_CONN_READ(from, cache_pages_inuse_ingest);
@@ -4584,6 +4573,7 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->dh_sweep_skip_ckpt += WT_STAT_CONN_READ(from, dh_sweep_skip_ckpt);
     to->dh_session_handles += WT_STAT_CONN_READ(from, dh_session_handles);
     to->dh_session_sweeps += WT_STAT_CONN_READ(from, dh_session_sweeps);
+    to->disagg_database_size += WT_STAT_CONN_READ(from, disagg_database_size);
     to->disagg_role_leader += WT_STAT_CONN_READ(from, disagg_role_leader);
     to->disagg_step_down_time += WT_STAT_CONN_READ(from, disagg_step_down_time);
     to->disagg_step_up_time += WT_STAT_CONN_READ(from, disagg_step_up_time);
@@ -4900,6 +4890,8 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
       WT_STAT_CONN_READ(from, rec_free_page_id_due_to_failed_replacement_reconciliation);
     to->rec_page_full_image_internal += WT_STAT_CONN_READ(from, rec_page_full_image_internal);
     to->rec_page_full_image_leaf += WT_STAT_CONN_READ(from, rec_page_full_image_leaf);
+    to->rec_ingest_keep_prepare_rollback +=
+      WT_STAT_CONN_READ(from, rec_ingest_keep_prepare_rollback);
     to->rec_page_delta_internal_key_deleted +=
       WT_STAT_CONN_READ(from, rec_page_delta_internal_key_deleted);
     to->rec_page_delta_internal_key_updated +=
@@ -5037,6 +5029,8 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->child_modify_blocked_page += WT_STAT_CONN_READ(from, child_modify_blocked_page);
     to->page_split_restart += WT_STAT_CONN_READ(from, page_split_restart);
     to->page_read_skip_deleted += WT_STAT_CONN_READ(from, page_read_skip_deleted);
+    to->txn_global_checkpoint_timestamp += WT_STAT_CONN_READ(from, txn_global_checkpoint_timestamp);
+    to->txn_global_durable_timestamp += WT_STAT_CONN_READ(from, txn_global_durable_timestamp);
     to->txn_prepared_updates += WT_STAT_CONN_READ(from, txn_prepared_updates);
     to->txn_prepared_updates_committed += WT_STAT_CONN_READ(from, txn_prepared_updates_committed);
     to->txn_prepared_updates_key_repeated +=
@@ -5090,11 +5084,21 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->txn_set_ts_stable_upd += WT_STAT_CONN_READ(from, txn_set_ts_stable_upd);
     to->txn_begin += WT_STAT_CONN_READ(from, txn_begin);
     to->txn_hs_ckpt_duration += WT_STAT_CONN_READ(from, txn_hs_ckpt_duration);
+    to->txn_global_last_running_timestamp +=
+      WT_STAT_CONN_READ(from, txn_global_last_running_timestamp);
+    to->txn_global_newest_timestamp += WT_STAT_CONN_READ(from, txn_global_newest_timestamp);
+    to->txn_global_oldest_timestamp += WT_STAT_CONN_READ(from, txn_global_oldest_timestamp);
+    to->txn_global_pinned_timestamp += WT_STAT_CONN_READ(from, txn_global_pinned_timestamp);
+    to->txn_global_stable_timestamp += WT_STAT_CONN_READ(from, txn_global_stable_timestamp);
+    to->txn_global_version_cursor_timestamp +=
+      WT_STAT_CONN_READ(from, txn_global_version_cursor_timestamp);
+    to->txn_pinned_readers += WT_STAT_CONN_READ(from, txn_pinned_readers);
     to->txn_pinned_range += WT_STAT_CONN_READ(from, txn_pinned_range);
     to->txn_pinned_checkpoint_range += WT_STAT_CONN_READ(from, txn_pinned_checkpoint_range);
-    to->txn_pinned_timestamp += WT_STAT_CONN_READ(from, txn_pinned_timestamp);
-    to->txn_pinned_timestamp_checkpoint += WT_STAT_CONN_READ(from, txn_pinned_timestamp_checkpoint);
-    to->txn_pinned_timestamp_reader += WT_STAT_CONN_READ(from, txn_pinned_timestamp_reader);
+    to->txn_pinned_timestamp_lag += WT_STAT_CONN_READ(from, txn_pinned_timestamp_lag);
+    to->txn_pinned_timestamp_checkpoint_lag +=
+      WT_STAT_CONN_READ(from, txn_pinned_timestamp_checkpoint_lag);
+    to->txn_pinned_timestamp_reader_lag += WT_STAT_CONN_READ(from, txn_pinned_timestamp_reader_lag);
     to->txn_pinned_timestamp_oldest += WT_STAT_CONN_READ(from, txn_pinned_timestamp_oldest);
     to->txn_timestamp_oldest_active_read +=
       WT_STAT_CONN_READ(from, txn_timestamp_oldest_active_read);

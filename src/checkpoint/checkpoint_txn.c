@@ -399,11 +399,9 @@ __wt_checkpoint_get_handles(WT_SESSION_IMPL *session, const char *cfg[])
 
     btree = S2BT(session);
 
-    /*
-     * Skip files that are never involved in a checkpoint. Skip the history store file as it is,
-     * checkpointed manually later.
-     */
-    if (F_ISSET(btree, WT_BTREE_NO_CHECKPOINT | WT_BTREE_IN_MEMORY) || WT_IS_HS(btree->dhandle))
+    /* Skip the history store file as it is checkpointed manually later. */
+    if (F_ISSET(btree, WT_BTREE_NO_CHECKPOINT | WT_BTREE_IN_MEMORY | WT_BTREE_READONLY) ||
+      WT_IS_HS(btree->dhandle))
         return (0);
 
     if (__wt_conn_is_disagg(session)) {
@@ -859,6 +857,52 @@ __checkpoint_verbose_track(WT_SESSION_IMPL *session, const char *msg)
     __wt_verbose_debug1(session, WT_VERB_CHECKPOINT,
       "time: %" PRIu64 " ms, gen: %" PRIu64 ": Full database checkpoint %s", msec,
       __wt_gen(session, WT_GEN_CHECKPOINT), msg);
+}
+
+/*
+ * __checkpoint_update_disagg_database_size --
+ *     On completion of the checkpoint, update the database size in disaggregated storage.
+ */
+static void
+__checkpoint_update_disagg_database_size(WT_SESSION_IMPL *session)
+{
+    WT_CONNECTION_IMPL *conn;
+
+    conn = S2C(session);
+
+    if (!__wt_conn_is_disagg(session))
+        return;
+
+    /*
+     * If this is a newly created database, add a 1MB buffer onto the database's size. This is done
+     * to account for the KEK table and shared turtle page size. Correctness here is provided by the
+     * fact that we pickup a new checkpoint on startup. Thus subsequent starts of the database will
+     * already have a checkpoint size set.
+     */
+    if (conn->disaggregated_storage.database_size == 0)
+        conn->disaggregated_storage.database_size = WT_DISAGG_CHECKPOINT_SIZE_BUFFER;
+
+    /*
+     * Apply the accumulated size delta to the in-memory database_size now that the checkpoint has
+     * succeeded. Positive deltas occur when data is added during the checkpoint. Negative deltas
+     * occur when data is removed reducing the total storage footprint. Guard against
+     * overflow/underflow in both cases.
+     */
+    if (session->ckpt.ckpt_size_delta != 0) {
+        uint64_t db;
+        int64_t delta;
+
+        db = conn->disaggregated_storage.database_size;
+        delta = session->ckpt.ckpt_size_delta;
+
+        if (delta > 0) {
+            WT_ASSERT(session, UINT64_MAX - db >= (uint64_t)delta);
+            __wt_disagg_set_database_size(session, db + (uint64_t)delta);
+        } else {
+            WT_ASSERT(session, db >= (uint64_t)(-delta));
+            __wt_disagg_set_database_size(session, db - (uint64_t)(-delta));
+        }
+    }
 }
 
 /*
@@ -1528,6 +1572,10 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
         WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_HS);
 
         WT_WITH_DHANDLE(session, hs_dhandle, ret = __wt_checkpoint_file(session, cfg));
+        if (ret != 0)
+            __wt_tsan_suppress_store_bool_v(&conn->txn_global.checkpoint_running_hs, false);
+        WT_ERR(ret);
+
         if (hs_dhandle_shared != NULL)
             WT_WITH_DHANDLE(session, hs_dhandle_shared, ret = __wt_checkpoint_file(session, cfg));
 
@@ -1600,6 +1648,7 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
     if (hs_dhandle_shared != NULL && F_ISSET(hs_dhandle_shared, WT_DHANDLE_OPEN)) {
         WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_HS_SYNC);
         WT_WITH_DHANDLE(session, hs_dhandle_shared, ret = __wt_checkpoint_sync(session, NULL));
+        WT_ERR(ret);
     }
 
     time_stop_fsync = __wt_clock(session);
@@ -1732,6 +1781,9 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
     } else
         conn->txn_global.last_ckpt_timestamp = WT_TS_NONE;
 
+    /* Disaggregated storage database size accounting. */
+    __checkpoint_update_disagg_database_size(session);
+
     WT_STAT_CONN_INCR(session, checkpoints_total_succeed);
 
 err:
@@ -1845,6 +1897,9 @@ err:
     __wt_free(session, session->ckpt.handle);
     WT_ASSERT(session, session->ckpt.crash_trigger_point == 0 && session->ckpt.crash_point == 0);
     session->ckpt.handle_allocated = session->ckpt.handle_next = 0;
+
+    /* Reset accumulated change in database size. Failed checkpoints do not affect database size. */
+    session->ckpt.ckpt_size_delta = 0;
 
     session->isolation = txn->isolation = saved_isolation;
     WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_INACTIVE);
