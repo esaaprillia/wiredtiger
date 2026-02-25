@@ -3311,12 +3311,7 @@ __wt_evict_page_urgent(WT_SESSION_IMPL *session, WT_REF *ref)
 
     page = ref->page;
 
-    if (S2BT(session)->evict_disabled > 0) {
-        WT_STAT_CONN_INCR(session, eviction_server_skip_pages_already_in_urgent_queue);
-        return (false);
-    }
-
-    if (F_ISSET_ATOMIC_16(page, WT_PAGE_EVICT_LRU_URGENT)) {
+    if (S2BT(session)->evict_disabled > 0 || F_ISSET_ATOMIC_16(page, WT_PAGE_EVICT_LRU_URGENT)) {
         WT_STAT_CONN_INCR(session, eviction_server_skip_pages_already_in_urgent_queue);
         return (false);
     }
