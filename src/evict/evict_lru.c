@@ -3312,24 +3312,14 @@ __wt_evict_page_urgent(WT_SESSION_IMPL *session, WT_REF *ref)
     WTI_EVICT_ENTRY *evict_entry;
     WTI_EVICT_QUEUE *urgent_queue;
     WT_PAGE *page;
-    bool checkpoint_split, queued;
+    bool queued;
 
     /* Root pages should never be evicted via LRU. */
     WT_ASSERT(session, !__wt_ref_is_root(ref));
 
     page = ref->page;
 
-    /*
-     * Bypass the evict_disabled check for clean pages with a pending multiblock split. Checkpoint
-     * sets evict_disabled to prevent eviction of dirty pages that could corrupt the checkpoint, but
-     * a clean multiblock page is safe: the eviction worker will just restructure the in-memory tree
-     * using blocks already written, with no reconciliation. Materializing the split eagerly avoids
-     * a costly re-reconciliation if the page is modified before the split is applied.
-     */
-    checkpoint_split = !__wt_page_is_modified(page) && page->modify != NULL &&
-      page->modify->rec_result == WT_PM_REC_MULTIBLOCK && page->modify->mod_multi_entries > 1;
-
-    if (S2BT(session)->evict_disabled > 0 && !checkpoint_split) {
+    if (S2BT(session)->evict_disabled > 0) {
         WT_STAT_CONN_INCR(session, eviction_server_skip_pages_already_in_urgent_queue);
         return (false);
     }
@@ -3350,8 +3340,7 @@ __wt_evict_page_urgent(WT_SESSION_IMPL *session, WT_REF *ref)
     __wt_spin_lock(session, &evict->evict_queue_lock);
 
     /* Check again, in case we raced with another thread. */
-    if ((S2BT(session)->evict_disabled > 0 && !checkpoint_split) ||
-      F_ISSET_ATOMIC_16(page, WT_PAGE_EVICT_LRU_URGENT))
+    if (S2BT(session)->evict_disabled > 0 || F_ISSET_ATOMIC_16(page, WT_PAGE_EVICT_LRU_URGENT))
         goto done;
 
     /*
