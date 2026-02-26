@@ -77,6 +77,7 @@ __wt_cache_create(WT_SESSION_IMPL *session, const char *cfg[])
     /* Use 0.2% of cache size, assume each entry spends 100B. */
     uint64_t x = S2C(session)->cache_size;
 
+    /* fix me: use 1% of total cache for fairness. */
     WT_RET(__wti_page_cache_init(session, (u_int)(x / 500 / 100)));
     WT_STAT_CONN_SET(session, page_cache_memory_allocated, x / 500);
     WT_STAT_CONN_SET(session, page_cache_hash_size, x / 500 / 100);

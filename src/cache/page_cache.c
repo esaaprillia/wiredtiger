@@ -23,6 +23,8 @@ __help_bucket(uint64_t hash, u_int hash_size)
     /* this simulates collision, the first 50% of buckets are mapped to first 50% slots, the next
      * 40% of buckets are mapped to the next 40%/5 which is 8% of slots, the last 10% of buckets are
      * mapped to 0.5% of slots.*/
+    /* fix me: don't use this help bucket for now */
+    t50 = hash_size;
     if (bucket <= t50) {
         return (bucket);
     } else if (bucket <= t90) {
@@ -142,18 +144,8 @@ __wt_page_cache_put(WT_SESSION_IMPL *session, const void *data, size_t data_size
 
     page_cache = &S2C(session)->cache->page_cache;
     block_meta_ptr = NULL;
-    data_ptr = NULL;
+    data_ptr = data;
     *page_cache_retp = NULL;
-
-    /*
-     * Allocate and initialize space in the cache outside of the critical section. In the unlikely
-     * event that we fail an allocation, free the space. NVRAM allocations can fail if there's no
-     * available memory, treat it as a cache-full failure.
-     */
-    WT_RET(__wt_malloc(session, data_size, &data_ptr));
-    if (data_ptr == NULL)
-        goto err;
-    memcpy(data_ptr, data, data_size);
 
     WT_ERR(__wt_calloc(session, 1, sizeof(*page_cache_store) + addr_size, &page_cache_store));
     page_cache_store->data = data_ptr;
@@ -226,7 +218,8 @@ done:
         WT_STAT_CONN_INCR(session, page_cache_total_entry_count);
 err:
     if (!cache_inserted) {
-        __wt_free(session, data_ptr);
+        /* fix me */
+        /*__wt_free(session, data_ptr);*/
         __wt_free(session, block_meta_ptr);
         __wt_free(session, page_cache_store);
     }
@@ -260,7 +253,8 @@ __wt_page_cache_release(WT_SESSION_IMPL *session, const uint8_t *addr, size_t ad
         __wt_spin_unlock(session, &page_cache->hash_locks[bucket]);
 
         __wt_free(session, page_cache_item->block_meta);
-        __wt_free(session, page_cache_item->data);
+        /* fix me */
+        /* __wt_free(session, page_cache_item->data);*/
         __wt_free(session, page_cache_item);
 
         WT_STAT_CONN_DECR(session, page_cache_total_entry_count);
@@ -337,7 +331,8 @@ __wti_page_cache_destroy(WT_SESSION_IMPL *session)
             page_cache_item = TAILQ_FIRST(&page_cache->hash[i]);
             TAILQ_REMOVE(&page_cache->hash[i], page_cache_item, hashq);
             __wt_free(session, page_cache_item->block_meta);
-            __wt_free(session, page_cache_item->data);
+            /* fix me */
+            /*__wt_free(session, page_cache_item->data);*/
             __wt_free(session, page_cache_item);
         }
         __wt_spin_unlock(session, &page_cache->hash_locks[i]);
