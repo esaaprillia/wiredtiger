@@ -135,7 +135,7 @@ __wt_page_cache_put(WT_SESSION_IMPL *session, const void *data, size_t data_size
     WT_PAGE_CACHE *page_cache;
     WT_PAGE_CACHE_ITEM *page_cache_item, *page_cache_store;
     uint64_t bucket, hash;
-    void *data_ptr;
+    const void *data_ptr;
     uint32_t bucket_size = 0;
     uint64_t time_diff, time_start, time_stop;
     bool cache_inserted = false;

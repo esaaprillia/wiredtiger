@@ -41,7 +41,7 @@ struct __wt_cache_eviction_controls {
 struct __wt_page_cache_item {
     TAILQ_ENTRY(__wt_page_cache_item) hashq;
 
-    void *data;
+    const void *data;
     uint32_t data_size;
 
     int32_t ref_count; /* References */
