@@ -347,6 +347,10 @@ static const char *const __stats_dsrc_desc[] = {
   "reconciliation: leaf full page key bytes discarded using prefix compression",
   "reconciliation: leaf page deltas written",
   "reconciliation: leaf page multi-block writes",
+  "reconciliation: leaf pages with a multi block reconciliation flagged for eviction during "
+  "checkpoint",
+  "reconciliation: leaf pages with a multi block reconciliation flagged for eviction during "
+  "checkpoint, dirty",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, dirty and "
   "btree syncing",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, history store "
@@ -367,10 +371,12 @@ static const char *const __stats_dsrc_desc[] = {
   "reconciliation failed",
   "reconciliation: leaf pages with a multi block reconciliation rejected by eviction, review "
   "failed",
+  "reconciliation: leaf pages with a multi block reconciliation successfully evicted after "
+  "checkpoint",
   "reconciliation: leaf pages with a multi block reconciliation that was queued for urgent "
-  "eviction during checkpoint",
+  "eviction during walk",
   "reconciliation: leaf pages with a multi block reconciliation that was queued for urgent "
-  "eviction during checkpoint, fail",
+  "eviction during walk, fail",
   "reconciliation: leaf pages with a multi block reconciliation that were re-reconciled by any "
   "method",
   "reconciliation: leaf pages with a multi block reconciliation that were re-reconciled by "
@@ -818,6 +824,8 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->rec_prefix_compression_full = 0;
     stats->rec_page_delta_leaf = 0;
     stats->rec_multiblock_leaf = 0;
+    stats->rec_multiblock_checkpoint_flagged = 0;
+    stats->rec_multiblock_checkpoint_flagged_dirty = 0;
     stats->rec_multiblock_checkpoint_evict_review_blocked_syncing = 0;
     stats->rec_multiblock_checkpoint_evict_review_hs_dirty = 0;
     stats->rec_multiblock_checkpoint_evict_review_inmemory = 0;
@@ -828,6 +836,7 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->rec_multiblock_checkpoint_evict_rejected_update = 0;
     stats->rec_multiblock_checkpoint_evict_review_reconcile_fail = 0;
     stats->rec_multiblock_checkpoint_evict_rejected_review = 0;
+    stats->rec_multiblock_checkpoint_evict_success = 0;
     stats->rec_multiblock_checkpoint_queued_evict = 0;
     stats->rec_multiblock_checkpoint_queued_evict_fail = 0;
     stats->rec_multiblock_unrealized_split_re_reconcile_total = 0;
@@ -1274,6 +1283,8 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
     to->rec_prefix_compression_full += from->rec_prefix_compression_full;
     to->rec_page_delta_leaf += from->rec_page_delta_leaf;
     to->rec_multiblock_leaf += from->rec_multiblock_leaf;
+    to->rec_multiblock_checkpoint_flagged += from->rec_multiblock_checkpoint_flagged;
+    to->rec_multiblock_checkpoint_flagged_dirty += from->rec_multiblock_checkpoint_flagged_dirty;
     to->rec_multiblock_checkpoint_evict_review_blocked_syncing +=
       from->rec_multiblock_checkpoint_evict_review_blocked_syncing;
     to->rec_multiblock_checkpoint_evict_review_hs_dirty +=
@@ -1294,6 +1305,7 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
       from->rec_multiblock_checkpoint_evict_review_reconcile_fail;
     to->rec_multiblock_checkpoint_evict_rejected_review +=
       from->rec_multiblock_checkpoint_evict_rejected_review;
+    to->rec_multiblock_checkpoint_evict_success += from->rec_multiblock_checkpoint_evict_success;
     to->rec_multiblock_checkpoint_queued_evict += from->rec_multiblock_checkpoint_queued_evict;
     to->rec_multiblock_checkpoint_queued_evict_fail +=
       from->rec_multiblock_checkpoint_queued_evict_fail;
@@ -1786,6 +1798,10 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
     to->rec_prefix_compression_full += WT_STAT_DSRC_READ(from, rec_prefix_compression_full);
     to->rec_page_delta_leaf += WT_STAT_DSRC_READ(from, rec_page_delta_leaf);
     to->rec_multiblock_leaf += WT_STAT_DSRC_READ(from, rec_multiblock_leaf);
+    to->rec_multiblock_checkpoint_flagged +=
+      WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_flagged);
+    to->rec_multiblock_checkpoint_flagged_dirty +=
+      WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_flagged_dirty);
     to->rec_multiblock_checkpoint_evict_review_blocked_syncing +=
       WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_review_blocked_syncing);
     to->rec_multiblock_checkpoint_evict_review_hs_dirty +=
@@ -1806,6 +1822,8 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
       WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_review_reconcile_fail);
     to->rec_multiblock_checkpoint_evict_rejected_review +=
       WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_rejected_review);
+    to->rec_multiblock_checkpoint_evict_success +=
+      WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_success);
     to->rec_multiblock_checkpoint_queued_evict +=
       WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_queued_evict);
     to->rec_multiblock_checkpoint_queued_evict_fail +=
@@ -2749,6 +2767,10 @@ static const char *const __stats_connection_desc[] = {
   "reconciliation: internal page multi-block writes",
   "reconciliation: leaf page deltas written",
   "reconciliation: leaf page multi-block writes",
+  "reconciliation: leaf pages with a multi block reconciliation flagged for eviction during "
+  "checkpoint",
+  "reconciliation: leaf pages with a multi block reconciliation flagged for eviction during "
+  "checkpoint, dirty",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, dirty and "
   "btree syncing",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, history store "
@@ -2769,10 +2791,12 @@ static const char *const __stats_connection_desc[] = {
   "reconciliation failed",
   "reconciliation: leaf pages with a multi block reconciliation rejected by eviction, review "
   "failed",
+  "reconciliation: leaf pages with a multi block reconciliation successfully evicted after "
+  "checkpoint",
   "reconciliation: leaf pages with a multi block reconciliation that was queued for urgent "
-  "eviction during checkpoint",
+  "eviction during walk",
   "reconciliation: leaf pages with a multi block reconciliation that was queued for urgent "
-  "eviction during checkpoint, fail",
+  "eviction during walk, fail",
   "reconciliation: leaf pages with a multi block reconciliation that were re-reconciled by any "
   "method",
   "reconciliation: leaf pages with a multi block reconciliation that were re-reconciled by "
@@ -3822,6 +3846,8 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->rec_multiblock_internal = 0;
     stats->rec_page_delta_leaf = 0;
     stats->rec_multiblock_leaf = 0;
+    stats->rec_multiblock_checkpoint_flagged = 0;
+    stats->rec_multiblock_checkpoint_flagged_dirty = 0;
     stats->rec_multiblock_checkpoint_evict_review_blocked_syncing = 0;
     stats->rec_multiblock_checkpoint_evict_review_hs_dirty = 0;
     stats->rec_multiblock_checkpoint_evict_review_inmemory = 0;
@@ -3832,6 +3858,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->rec_multiblock_checkpoint_evict_rejected_update = 0;
     stats->rec_multiblock_checkpoint_evict_review_reconcile_fail = 0;
     stats->rec_multiblock_checkpoint_evict_rejected_review = 0;
+    stats->rec_multiblock_checkpoint_evict_success = 0;
     stats->rec_multiblock_checkpoint_queued_evict = 0;
     stats->rec_multiblock_checkpoint_queued_evict_fail = 0;
     stats->rec_multiblock_unrealized_split_re_reconcile_total = 0;
@@ -5069,6 +5096,10 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->rec_multiblock_internal += WT_STAT_CONN_READ(from, rec_multiblock_internal);
     to->rec_page_delta_leaf += WT_STAT_CONN_READ(from, rec_page_delta_leaf);
     to->rec_multiblock_leaf += WT_STAT_CONN_READ(from, rec_multiblock_leaf);
+    to->rec_multiblock_checkpoint_flagged +=
+      WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_flagged);
+    to->rec_multiblock_checkpoint_flagged_dirty +=
+      WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_flagged_dirty);
     to->rec_multiblock_checkpoint_evict_review_blocked_syncing +=
       WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_review_blocked_syncing);
     to->rec_multiblock_checkpoint_evict_review_hs_dirty +=
@@ -5089,6 +5120,8 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
       WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_review_reconcile_fail);
     to->rec_multiblock_checkpoint_evict_rejected_review +=
       WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_rejected_review);
+    to->rec_multiblock_checkpoint_evict_success +=
+      WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_success);
     to->rec_multiblock_checkpoint_queued_evict +=
       WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_queued_evict);
     to->rec_multiblock_checkpoint_queued_evict_fail +=

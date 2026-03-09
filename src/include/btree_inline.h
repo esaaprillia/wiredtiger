@@ -75,7 +75,7 @@ __wt_evict_page_soon_check(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_sp
      * dirty eviction: that is handled explicitly in __wt_sync_file.
      */
     if (__wt_evict_page_is_soon_or_wont_need(page) && btree->evict_disabled == 0 &&
-      __wt_page_can_evict(session, ref, inmem_split) &&
+      __wt_page_can_evict(session, ref, inmem_split, false) &&
       (!WT_SESSION_IS_CHECKPOINT(session) || __wt_page_evict_clean(page)))
         return (true);
     return (false);
@@ -2258,13 +2258,15 @@ __wt_btree_can_discard(WT_SESSION_IMPL *session)
  *     Check whether a page can be evicted.
  */
 static WT_INLINE bool
-__wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
+__wt_page_can_evict(
+  WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp, bool checkpoint_split)
 {
     WT_BTREE *btree;
     WT_PAGE *page;
     WT_PAGE_MODIFY *mod;
     uint64_t checkpoint_gen;
     bool checkpoint_running, modified;
+    WT_UNUSED(checkpoint_split);
 
     if (inmem_splitp != NULL)
         *inmem_splitp = false;
@@ -2278,6 +2280,7 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
      * The prefetch thread would crash if it sees a freed ref.
      */
     if (F_ISSET_ATOMIC_8(ref, WT_REF_FLAG_PREFETCH)) {
+        // NOT THIS.
         WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_prefetched);
         return (false);
     }
@@ -2300,6 +2303,7 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
         else if (__wt_materialization_check(session, page->disagg_info->rec_lsn_max))
             return (true);
         else {
+            // THIS IS NOT WHY.
             WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_materialization);
             return (false);
         }
@@ -2320,6 +2324,7 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
      * transaction commits.
      */
     if (mod->inst_updates != NULL) {
+        // NOR THIS.
         WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_uncommitted_truncate);
         return (false);
     }
@@ -2333,6 +2338,7 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
      */
     if (__wt_btree_syncing_by_other_session(session) &&
       F_ISSET_ATOMIC_16(ref->home, WT_PAGE_INTL_OVERFLOW_KEYS)) {
+        // NOR THIS.
         WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_overflow_keys);
         return (false);
     }
@@ -2366,6 +2372,7 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
      * internal page already written in the checkpoint, leaving the checkpoint inconsistent.
      */
     if (modified && __wt_btree_syncing_by_other_session(session)) {
+        // NOR THIS.
         WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_checkpoint);
         return (false);
     }
@@ -2375,6 +2382,7 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
      * in-memory and it will not reduce cache usage.
      */
     if (modified && page->disagg_info != NULL && F_ISSET(ref, WT_REF_FLAG_INTERNAL)) {
+        // NOR THIS>
         WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_disagg_dirty_internal_page);
         return (false);
     }
@@ -2391,6 +2399,7 @@ __wt_page_can_evict(WT_SESSION_IMPL *session, WT_REF *ref, bool *inmem_splitp)
             checkpoint_running =
               __wt_atomic_load_bool_v_acquire(&S2C(session)->txn_global.checkpoint_running);
             if (checkpoint_running) {
+                // POSSIBLE RELATED?
                 WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_disagg_next_checkpoint);
                 return (false);
             }

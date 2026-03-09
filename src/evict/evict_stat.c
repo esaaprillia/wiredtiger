@@ -51,7 +51,7 @@ __evict_stat_walk(WT_SESSION_IMPL *session)
         else
             ++pages_clean;
 
-        if (!__wt_ref_is_root(next_walk) && !__wt_page_can_evict(session, next_walk, NULL))
+        if (!__wt_ref_is_root(next_walk) && !__wt_page_can_evict(session, next_walk, NULL, false))
             ++num_not_queueable;
 
         if (F_ISSET_ATOMIC_16(page, WT_PAGE_EVICT_LRU))

@@ -1232,6 +1232,8 @@ struct __wt_connection_stats {
     int64_t rec_multiblock_internal;
     int64_t rec_page_delta_leaf;
     int64_t rec_multiblock_leaf;
+    int64_t rec_multiblock_checkpoint_flagged;
+    int64_t rec_multiblock_checkpoint_flagged_dirty;
     int64_t rec_multiblock_checkpoint_evict_review_blocked_syncing;
     int64_t rec_multiblock_checkpoint_evict_review_hs_dirty;
     int64_t rec_multiblock_checkpoint_evict_review_inmemory;
@@ -1242,6 +1244,7 @@ struct __wt_connection_stats {
     int64_t rec_multiblock_checkpoint_evict_rejected_update;
     int64_t rec_multiblock_checkpoint_evict_review_reconcile_fail;
     int64_t rec_multiblock_checkpoint_evict_rejected_review;
+    int64_t rec_multiblock_checkpoint_evict_success;
     int64_t rec_multiblock_checkpoint_queued_evict;
     int64_t rec_multiblock_checkpoint_queued_evict_fail;
     int64_t rec_multiblock_unrealized_split_re_reconcile_total;
@@ -1761,6 +1764,8 @@ struct __wt_dsrc_stats {
     int64_t rec_prefix_compression_full;
     int64_t rec_page_delta_leaf;
     int64_t rec_multiblock_leaf;
+    int64_t rec_multiblock_checkpoint_flagged;
+    int64_t rec_multiblock_checkpoint_flagged_dirty;
     int64_t rec_multiblock_checkpoint_evict_review_blocked_syncing;
     int64_t rec_multiblock_checkpoint_evict_review_hs_dirty;
     int64_t rec_multiblock_checkpoint_evict_review_inmemory;
@@ -1771,6 +1776,7 @@ struct __wt_dsrc_stats {
     int64_t rec_multiblock_checkpoint_evict_rejected_update;
     int64_t rec_multiblock_checkpoint_evict_review_reconcile_fail;
     int64_t rec_multiblock_checkpoint_evict_rejected_review;
+    int64_t rec_multiblock_checkpoint_evict_success;
     int64_t rec_multiblock_checkpoint_queued_evict;
     int64_t rec_multiblock_checkpoint_queued_evict_fail;
     int64_t rec_multiblock_unrealized_split_re_reconcile_total;
