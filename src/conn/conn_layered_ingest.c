@@ -297,8 +297,15 @@ __layered_drain_worker_run(WT_SESSION_IMPL *session, WT_THREAD *ctx)
     WT_ERR_MSG_CHK(session, __layered_copy_ingest_table(session, work_item->entry),
       "Failed to copy ingest table \"%s\" to stable table \"%s\"", work_item->entry->ingest_uri,
       work_item->entry->stable_uri);
-    WT_ERR_MSG_CHK(session, __layered_clear_ingest_table(session, work_item->entry->ingest_uri),
-      "Failed to clear ingest table \"%s\"", work_item->entry->ingest_uri);
+    // WT_ERR_MSG_CHK(session, __layered_clear_ingest_table(session, work_item->entry->ingest_uri),
+    //   "Failed to clear ingest table \"%s\"", work_item->entry->ingest_uri);
+
+    do {
+        ret = (__layered_clear_ingest_table(session, work_item->entry->ingest_uri));
+        if (ret != 0)
+            WT_ERR_MSG(
+              session, ret, "Failed to clear ingest table \"%s\"", work_item->entry->ingest_uri);
+    } while (0);
 
     WT_ASSERT(session, work_item->entry->pinned_dhandle != NULL);
     WT_WITH_DHANDLE(session, work_item->entry->pinned_dhandle, {
