@@ -302,9 +302,18 @@ __layered_drain_worker_run(WT_SESSION_IMPL *session, WT_THREAD *ctx)
 
     do {
         ret = (__layered_clear_ingest_table(session, work_item->entry->ingest_uri));
-        if (ret != 0)
-            WT_ERR_MSG(
-              session, ret, "Failed to clear ingest table \"%s\"", work_item->entry->ingest_uri);
+        if (ret != 0) {
+            do {
+                ((void)!(
+                  __wt_error_log_add("/home/ubuntu/wiredtiger/src/conn/conn_layered_ingest.c",
+                    __PRETTY_FUNCTION__, 307, "ret", ret, (-32000))));
+                __wt_err_func(session, ret, __PRETTY_FUNCTION__, 307, WT_VERB_DEFAULT,
+                  "Failed to clear ingest table \"%s\"", work_item->entry->ingest_uri);
+                __wt_session_set_last_error(session, ret, (-32000),
+                  "Failed to clear ingest table \"%s\"", work_item->entry->ingest_uri);
+                goto err;
+            } while (0);
+        }
     } while (0);
 
     WT_ASSERT(session, work_item->entry->pinned_dhandle != NULL);
