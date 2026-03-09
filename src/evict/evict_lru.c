@@ -2524,6 +2524,20 @@ __evict_try_queue_page(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue, WT_REF 
         }
     }
 
+    /*
+     * Pages flagged during checkpoint as having a multiblock split go on the urgent queue.
+     * Materializing these splits avoids a costly re-reconciliation if the page is dirtied later.
+     */
+    // TODO: Wait for checkpoint to finish.
+    if (F_ISSET_ATOMIC_16(page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT)) {
+        WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_queued_evict);
+        if (__wt_evict_page_urgent(session, ref))
+            *urgent_queuedp = true;
+        else
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_queued_evict_fail);
+        return;
+    }
+
     /* Pages being forcibly evicted go on the urgent queue. */
     if (modified &&
       (__wt_atomic_load_uint64_relaxed(&page->read_gen) == WT_READGEN_EVICT_SOON ||
@@ -2600,7 +2614,7 @@ __evict_try_queue_page(WT_SESSION_IMPL *session, WTI_EVICT_QUEUE *queue, WT_REF 
 
 fast:
     /* If the page can't be evicted, give up. */
-    if (!__wt_page_can_evict(session, ref, NULL))
+    if (!__wt_page_can_evict(session, ref, NULL, false))
         return;
 
     WT_ASSERT(session, evict_entry->ref == NULL);

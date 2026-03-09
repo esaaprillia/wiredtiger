@@ -501,8 +501,11 @@ err:
     }
 
 done:
-    if (checkpoint_split)
+    if (checkpoint_split) {
         F_CLR_ATOMIC_16(page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT);
+        if (ret == 0)
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_success);
+    }
     if (ret == 0)
         FLD_SET(stats_flags, WT_EVICT_STATS_SUCCESS);
     __evict_stats_update(session, stats_flags);
@@ -1056,10 +1059,9 @@ __evict_review(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags, bool
         if (modified)
             WT_RET(__wt_txn_update_oldest(session, WT_TXN_OLDEST_STRICT));
 
-        if (!__wt_page_can_evict(session, ref, inmem_splitp)) {
+        if (!__wt_page_can_evict(session, ref, inmem_splitp, checkpoint_split)) {
             if (checkpoint_split) {
-                WT_STAT_CONN_INCR(
-                  session, rec_multiblock_checkpoint_evict_review_cannot_evict);
+                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_review_cannot_evict);
                 if (modified && __wt_btree_syncing_by_other_session(session))
                     WT_STAT_CONN_INCR(
                       session, rec_multiblock_checkpoint_evict_review_blocked_syncing);

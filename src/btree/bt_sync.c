@@ -139,18 +139,15 @@ __wt_sync_file(WT_SESSION_IMPL *session, WT_CACHE_OP syncop)
     WT_DECL_RET;
     WT_PAGE *page;
     WT_PAGE_MODIFY *mod;
-    WT_REF **multiblock_queue, *prev, *walk;
+    WT_REF *prev, *walk;
     WT_TXN *txn;
-    size_t multiblock_queue_alloc;
     uint64_t internal_bytes, internal_pages, leaf_bytes, leaf_pages;
     uint64_t oldest_id, saved_pinned_id, time_start, time_stop;
-    uint32_t flags, multiblock_queue_cnt, qi, rec_flags;
+    uint32_t flags, multiblock_queue_cnt, rec_flags;
     bool dirty, is_hs, is_internal, tried_eviction;
 
     conn = S2C(session);
     btree = S2BT(session);
-    multiblock_queue = NULL;
-    multiblock_queue_alloc = 0;
     multiblock_queue_cnt = 0;
     prev = walk = NULL;
     txn = session->txn;
@@ -273,8 +270,8 @@ __wt_sync_file(WT_SESSION_IMPL *session, WT_CACHE_OP syncop)
 /*
  * Toggle for post-checkpoint multiblock split eviction. When enabled, checkpoint collects leaf
  * pages that had a multiblock reconciliation and queues them for urgent eviction after the tree
- * walk completes. This materializes the split eagerly, avoiding a costly re-reconciliation if
- * the page is subsequently dirtied.
+ * walk completes. This materializes the split eagerly, avoiding a costly re-reconciliation if the
+ * page is subsequently dirtied.
  */
 #define WT_CHECKPOINT_MULTIBLOCK_EVICT true
 
@@ -325,9 +322,9 @@ __wt_sync_file(WT_SESSION_IMPL *session, WT_CACHE_OP syncop)
                  */
                 if (WT_CHECKPOINT_MULTIBLOCK_EVICT && !is_internal && mod != NULL &&
                   mod->rec_result == WT_PM_REC_MULTIBLOCK && mod->mod_multi_entries > 1) {
-                    WT_ERR(__wt_realloc_def(session, &multiblock_queue_alloc,
-                      multiblock_queue_cnt + 1, &multiblock_queue));
-                    multiblock_queue[multiblock_queue_cnt++] = walk;
+                    F_SET_ATOMIC_16(page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT);
+                    WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_flagged);
+                    ++multiblock_queue_cnt;
                 }
 
                 continue;
@@ -394,15 +391,15 @@ __wt_sync_file(WT_SESSION_IMPL *session, WT_CACHE_OP syncop)
 
             /*
              * Collect leaf pages where reconciliation produced a multiblock split so they can be
-             * queued for eviction after the tree walk completes. This applies regardless of
-             * whether the page is now clean or still dirty.
+             * queued for eviction after the tree walk completes. This applies regardless of whether
+             * the page is now clean or still dirty.
              */
             if (WT_CHECKPOINT_MULTIBLOCK_EVICT && !is_internal && page->modify != NULL &&
               page->modify->rec_result == WT_PM_REC_MULTIBLOCK &&
               page->modify->mod_multi_entries > 1) {
-                WT_ERR(__wt_realloc_def(session, &multiblock_queue_alloc,
-                  multiblock_queue_cnt + 1, &multiblock_queue));
-                multiblock_queue[multiblock_queue_cnt++] = walk;
+                F_SET_ATOMIC_16(page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT);
+                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_flagged_dirty);
+                ++multiblock_queue_cnt;
             }
 
             /* Update checkpoint IO tracking data. */
@@ -470,30 +467,37 @@ err:
          * FIXME-WT-16110: Investigate what should be the correct memory ordering for these
          * variables.
          */
-        /*
-         * Queue all collected multiblock pages for urgent eviction. Materializing these splits
-         * avoids a costly re-reconciliation if the page is subsequently dirtied and eviction must
-         * repeat the multi-block write.
-         *
-         * We queue before clearing the syncing flag to guarantee the refs are still valid: while
-         * syncing is set, no other session can evict pages from this btree. The evict_disabled
-         * counter is not set during normal checkpoints so __wt_evict_page_urgent will accept the
-         * pages. An eviction worker that processes an entry before syncing is cleared will get
-         * EBUSY, which is harmless -- the page stays in cache and will be picked up by a later
-         * eviction walk.
-         */
-        for (qi = 0; qi < multiblock_queue_cnt; qi++) {
-            F_SET_ATOMIC_16(multiblock_queue[qi]->page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT);
-            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_queued_evict);
-            if (!__wt_evict_page_urgent(session, multiblock_queue[qi]))
-                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_queued_evict_fail);
-        }
-
         __wt_atomic_store_enum_release(&btree->syncing, WT_BTREE_SYNC_OFF);
         __wt_atomic_store_ptr_release(&btree->sync_session, NULL);
-    }
 
-    __wt_free(session, multiblock_queue);
+        /*
+         * If we flagged any multiblock pages during the walk, prompt the eviction server to walk
+         * this tree so it can queue those pages urgently. The pages were flagged with
+         * WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT at collection time (under the hazard pointer); the
+         * eviction walker will find them, push them onto the urgent queue, and clear the flag.
+         *
+         * Reset the walk period so the eviction server won't skip this tree on its next pass.
+         */
+        if (WT_CHECKPOINT_MULTIBLOCK_EVICT && multiblock_queue_cnt > 0) {
+            __wt_atomic_store_uint32_relaxed(&btree->evict_walk_period, 0);
+            btree->evict_walk_skips = 0;
+
+#define WT_CHECKPOINT_MULTIBLOCK_EVICT_HINT_WALK_TREE true
+            if (WT_CHECKPOINT_MULTIBLOCK_EVICT_HINT_WALK_TREE) {
+                WT_DATA_HANDLE *old_walk;
+                WT_EVICT *evict;
+
+                evict = conn->evict;
+                old_walk = evict->walk_tree;
+                if (old_walk != btree->dhandle) {
+                    (void)__wt_atomic_add_int32(&btree->dhandle->session_inuse, 1);
+                    evict->walk_tree = btree->dhandle;
+                    if (old_walk != NULL)
+                        (void)__wt_atomic_sub_int32(&old_walk->session_inuse, 1);
+                }
+            }
+        }
+    }
 
     __wt_spin_unlock(session, &btree->flush_lock);
 

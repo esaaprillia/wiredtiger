@@ -726,14 +726,14 @@ struct __wt_page {
     uint32_t prefix_stop;  /* Maximum slot to which the best page prefix applies */
 
 /* AUTOMATIC FLAG VALUE GENERATION START 0 */
-#define WT_PAGE_BUILD_KEYS 0x0001u        /* Keys have been built in memory */
-#define WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT 0x0002u /* Checkpoint queued page for multiblock split */
-#define WT_PAGE_COMPACTION_WRITE 0x0004u  /* Writing the page for compaction */
-#define WT_PAGE_DISK_ALLOC 0x0008u        /* Disk image in allocated memory */
-#define WT_PAGE_DISK_MAPPED 0x0010u       /* Disk image in mapped memory */
-#define WT_PAGE_EVICT_LRU 0x0020u         /* Page is on the LRU queue */
-#define WT_PAGE_EVICT_LRU_URGENT 0x0040u  /* Page is in the urgent queue */
-#define WT_PAGE_EVICT_NO_PROGRESS 0x0080u /* Eviction doesn't count as progress */
+#define WT_PAGE_BUILD_KEYS 0x0001u                  /* Keys have been built in memory */
+#define WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT 0x0002u /* Checkpoint flagged for urgent eviction. */
+#define WT_PAGE_COMPACTION_WRITE 0x0004u            /* Writing the page for compaction */
+#define WT_PAGE_DISK_ALLOC 0x0008u                  /* Disk image in allocated memory */
+#define WT_PAGE_DISK_MAPPED 0x0010u                 /* Disk image in mapped memory */
+#define WT_PAGE_EVICT_LRU 0x0020u                   /* Page is on the LRU queue */
+#define WT_PAGE_EVICT_LRU_URGENT 0x0040u            /* Page is in the urgent queue */
+#define WT_PAGE_EVICT_NO_PROGRESS 0x0080u           /* Eviction doesn't count as progress */
 #define WT_PAGE_INMEM_SPLIT 0x0100u
 #define WT_PAGE_INTL_OVERFLOW_KEYS 0x0200u /* Internal page has overflow keys (historic only) */
 #define WT_PAGE_INTL_PINDEX_UPDATE 0x0400u /* Page index updated */
