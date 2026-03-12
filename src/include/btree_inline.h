@@ -2303,7 +2303,9 @@ __wt_page_can_evict(
         else if (__wt_materialization_check(session, page->disagg_info->rec_lsn_max))
             return (true);
         else {
-            // THIS IS NOT WHY.
+            if (checkpoint_split)
+                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_page_cant_evict_materialization);
+            // This is partly why.... 20K
             WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_materialization);
             return (false);
         }
@@ -2362,6 +2364,8 @@ __wt_page_can_evict(
      */
     if (!modified && page->disagg_info != NULL &&
       !__wt_materialization_check(session, page->disagg_info->rec_lsn_max)) {
+        if (checkpoint_split)
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean);    
         WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_materialization);
         return (false);
     }
@@ -2372,7 +2376,8 @@ __wt_page_can_evict(
      * internal page already written in the checkpoint, leaving the checkpoint inconsistent.
      */
     if (modified && __wt_btree_syncing_by_other_session(session)) {
-        // NOR THIS.
+        if (checkpoint_split)
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint);
         WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_checkpoint);
         return (false);
     }
@@ -2382,7 +2387,7 @@ __wt_page_can_evict(
      * in-memory and it will not reduce cache usage.
      */
     if (modified && page->disagg_info != NULL && F_ISSET(ref, WT_REF_FLAG_INTERNAL)) {
-        // NOR THIS>
+        // NOR THIS>    
         WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_disagg_dirty_internal_page);
         return (false);
     }
@@ -2400,6 +2405,8 @@ __wt_page_can_evict(
               __wt_atomic_load_bool_v_acquire(&S2C(session)->txn_global.checkpoint_running);
             if (checkpoint_running) {
                 // POSSIBLE RELATED?
+                if (checkpoint_split)
+                    WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint);
                 WT_STAT_CONN_DSRC_INCR(session, cache_eviction_blocked_disagg_next_checkpoint);
                 return (false);
             }

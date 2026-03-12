@@ -1244,6 +1244,10 @@ struct __wt_connection_stats {
     int64_t rec_multiblock_checkpoint_evict_review_hs_dirty;
     int64_t rec_multiblock_checkpoint_evict_review_inmemory;
     int64_t rec_multiblock_checkpoint_evict_review_cannot_evict;
+    int64_t rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint;
+    int64_t rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint;
+    int64_t rec_multiblock_checkpoint_evict_page_cant_evict_materialization;
+    int64_t rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean;
     int64_t rec_multiblock_checkpoint_evict_review_precise_ckpt;
     int64_t rec_multiblock_checkpoint_evict_review_no_reconcile;
     int64_t rec_multiblock_checkpoint_evict_rejected_exclusive;
@@ -1786,6 +1790,10 @@ struct __wt_dsrc_stats {
     int64_t rec_multiblock_checkpoint_evict_review_hs_dirty;
     int64_t rec_multiblock_checkpoint_evict_review_inmemory;
     int64_t rec_multiblock_checkpoint_evict_review_cannot_evict;
+    int64_t rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint;
+    int64_t rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint;
+    int64_t rec_multiblock_checkpoint_evict_page_cant_evict_materialization;
+    int64_t rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean;
     int64_t rec_multiblock_checkpoint_evict_review_precise_ckpt;
     int64_t rec_multiblock_checkpoint_evict_review_no_reconcile;
     int64_t rec_multiblock_checkpoint_evict_rejected_exclusive;

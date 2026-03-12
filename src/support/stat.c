@@ -362,6 +362,14 @@ static const char *const __stats_dsrc_desc[] = {
   "btree",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
   "evicted",
+  "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
+  "evicted due to belonging to the next checkpoint",
+  "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
+  "evicted due to checkpoint running",
+  "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
+  "evicted due to materialization frontier",
+  "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
+  "evicted due to materialization frontier, clean page",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, precise "
   "checkpoint",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, reconciliation "
@@ -844,6 +852,10 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->rec_multiblock_checkpoint_evict_review_hs_dirty = 0;
     stats->rec_multiblock_checkpoint_evict_review_inmemory = 0;
     stats->rec_multiblock_checkpoint_evict_review_cannot_evict = 0;
+    stats->rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint = 0;
+    stats->rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint = 0;
+    stats->rec_multiblock_checkpoint_evict_page_cant_evict_materialization = 0;
+    stats->rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean = 0;
     stats->rec_multiblock_checkpoint_evict_review_precise_ckpt = 0;
     stats->rec_multiblock_checkpoint_evict_review_no_reconcile = 0;
     stats->rec_multiblock_checkpoint_evict_rejected_exclusive = 0;
@@ -1317,6 +1329,14 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
       from->rec_multiblock_checkpoint_evict_review_inmemory;
     to->rec_multiblock_checkpoint_evict_review_cannot_evict +=
       from->rec_multiblock_checkpoint_evict_review_cannot_evict;
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint +=
+      from->rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint;
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint +=
+      from->rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint;
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_materialization +=
+      from->rec_multiblock_checkpoint_evict_page_cant_evict_materialization;
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean +=
+      from->rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean;
     to->rec_multiblock_checkpoint_evict_review_precise_ckpt +=
       from->rec_multiblock_checkpoint_evict_review_precise_ckpt;
     to->rec_multiblock_checkpoint_evict_review_no_reconcile +=
@@ -1847,6 +1867,14 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
       WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_review_inmemory);
     to->rec_multiblock_checkpoint_evict_review_cannot_evict +=
       WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_review_cannot_evict);
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint +=
+      WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint);
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint +=
+      WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint);
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_materialization +=
+      WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_page_cant_evict_materialization);
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean += WT_STAT_DSRC_READ(
+      from, rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean);
     to->rec_multiblock_checkpoint_evict_review_precise_ckpt +=
       WT_STAT_DSRC_READ(from, rec_multiblock_checkpoint_evict_review_precise_ckpt);
     to->rec_multiblock_checkpoint_evict_review_no_reconcile +=
@@ -2839,6 +2867,14 @@ static const char *const __stats_connection_desc[] = {
   "btree",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
   "evicted",
+  "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
+  "evicted due to belonging to the next checkpoint",
+  "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
+  "evicted due to checkpoint running",
+  "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
+  "evicted due to materialization frontier",
+  "reconciliation: leaf pages with a multi block reconciliation rejected at review, page cannot be "
+  "evicted due to materialization frontier, clean page",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, precise "
   "checkpoint",
   "reconciliation: leaf pages with a multi block reconciliation rejected at review, reconciliation "
@@ -3927,6 +3963,10 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->rec_multiblock_checkpoint_evict_review_hs_dirty = 0;
     stats->rec_multiblock_checkpoint_evict_review_inmemory = 0;
     stats->rec_multiblock_checkpoint_evict_review_cannot_evict = 0;
+    stats->rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint = 0;
+    stats->rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint = 0;
+    stats->rec_multiblock_checkpoint_evict_page_cant_evict_materialization = 0;
+    stats->rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean = 0;
     stats->rec_multiblock_checkpoint_evict_review_precise_ckpt = 0;
     stats->rec_multiblock_checkpoint_evict_review_no_reconcile = 0;
     stats->rec_multiblock_checkpoint_evict_rejected_exclusive = 0;
@@ -5202,6 +5242,14 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
       WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_review_inmemory);
     to->rec_multiblock_checkpoint_evict_review_cannot_evict +=
       WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_review_cannot_evict);
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint +=
+      WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_page_cant_evict_next_checkpoint);
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint +=
+      WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_page_cant_evict_checkpoint);
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_materialization +=
+      WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_page_cant_evict_materialization);
+    to->rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean += WT_STAT_CONN_READ(
+      from, rec_multiblock_checkpoint_evict_page_cant_evict_materialization_clean);
     to->rec_multiblock_checkpoint_evict_review_precise_ckpt +=
       WT_STAT_CONN_READ(from, rec_multiblock_checkpoint_evict_review_precise_ckpt);
     to->rec_multiblock_checkpoint_evict_review_no_reconcile +=

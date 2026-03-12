@@ -273,7 +273,7 @@ __wt_sync_file(WT_SESSION_IMPL *session, WT_CACHE_OP syncop)
  * walk completes. This materializes the split eagerly, avoiding a costly re-reconciliation if the
  * page is subsequently dirtied.
  */
-#define WT_CHECKPOINT_MULTIBLOCK_EVICT true
+#define WT_CHECKPOINT_MULTIBLOCK_EVICT false
 
         /* Write all dirty in-cache pages. */
         LF_SET(WT_READ_NO_EVICT);

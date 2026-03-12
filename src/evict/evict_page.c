@@ -319,15 +319,16 @@ __wt_evict(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE previous_state, u
     WT_PAGE *page;
     uint64_t page_size;
     uint8_t stats_flags;
-    bool checkpoint_split, clean_page, closing, ebusy_only, exclusive_acquired;
-    bool inmem_split, is_dirty, tree_dead;
+    bool checkpoint_split, clean_page, closing, ebusy_only, exclusive_acquired, page_update;
+    bool inmem_split, is_dirty, tree_dead, review;
 
+    review = false;
     conn = S2C(session);
     page = ref->page;
     closing = LF_ISSET(WT_EVICT_CALL_CLOSING);
     stats_flags = 0;
     checkpoint_split = F_ISSET_ATOMIC_16(page, WT_PAGE_CHECKPOINT_MULTIBLOCK_SPLIT);
-    clean_page = ebusy_only = exclusive_acquired = is_dirty = false;
+    clean_page = exclusive_acquired = ebusy_only = is_dirty = page_update = false;
 
     __wt_verbose_debug3(
       session, WT_VERB_EVICTION, "page %p (%s)", (void *)page, __wt_page_type_string(page->type));
@@ -393,8 +394,9 @@ __wt_evict(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE previous_state, u
      * example, we find a page with active children), quit. Make this check for clean pages, too:
      * while unlikely eviction would choose an internal page with children, it's not disallowed.
      */
+    review = true;
     WT_ERR(__evict_review(session, ref, flags, &inmem_split));
-
+    review = false;
     /*
      * If we decide to do an in-memory split. Do it now. If an in-memory split completes, the page
      * stays in memory and the tree is left in the desired state: avoid the usual cleanup.
@@ -461,6 +463,7 @@ __wt_evict(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE previous_state, u
     }
 
     /* Update the reference and discard the page. */
+    page_update = true;
     if (__wt_ref_is_root(ref))
         __wt_ref_out(session, ref);
     else if ((clean_page && !F_ISSET(S2BT(session), WT_BTREE_IN_MEMORY)) || tree_dead)
@@ -483,14 +486,14 @@ err:
           &conn->evict->evict_max_evict_page_attempts, page->evict_page_attempts);
 
         if (checkpoint_split) {
-            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected);
-            WT_STAT_CONN_SET(session, rec_multiblock_checkpoint_evict_fail_last_error, ret);
+            if (review)
+                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected_review);
             if (!exclusive_acquired)
                 WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected_exclusive);
-            else if (!ebusy_only)
-                WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected_review);
-            else
+            if (page_update)
                 WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected_update);
+            WT_STAT_CONN_INCR(session, rec_multiblock_checkpoint_evict_rejected);
+            WT_STAT_CONN_SET(session, rec_multiblock_checkpoint_evict_fail_last_error, ret);
         }
 
         if (!closing)
