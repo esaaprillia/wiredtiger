@@ -1336,39 +1336,364 @@ __checkpoint_db_debug_crash_points(WT_SESSION_IMPL *session, const char *cfg[])
 }
 
 /*
+ * __checkpoint_reset_stats --
+ *     Reset per-checkpoint statistics before starting a new checkpoint.
+ */
+static void
+__checkpoint_reset_stats(WT_SESSION_IMPL *session)
+{
+    WT_CONNECTION_IMPL *conn;
+    WT_EVICT *evict;
+
+    conn = S2C(session);
+    evict = conn->evict;
+
+    __wt_atomic_store_uint64_relaxed(&evict->evict_max_unvisited_gen_gap_per_checkpoint, 0);
+    __wt_atomic_store_uint64_relaxed(&evict->evict_max_visited_gen_gap_per_checkpoint, 0);
+    __wt_atomic_store_uint64_relaxed(&evict->evict_max_clean_page_size_per_checkpoint, 0);
+    __wt_atomic_store_uint64_relaxed(&evict->evict_max_dirty_page_size_per_checkpoint, 0);
+    __wt_atomic_store_uint64_relaxed(&evict->evict_max_updates_page_size_per_checkpoint, 0);
+    __wt_atomic_store_uint64_relaxed(&evict->evict_max_ms_per_checkpoint, 0);
+    __wt_atomic_store_uint16_relaxed(&evict->evict_max_eviction_queue_attempts, 0);
+    __wt_atomic_store_uint16_relaxed(&evict->evict_max_evict_page_attempts, 0);
+    __wt_atomic_store_uint64_relaxed(&evict->reentry_hs_eviction_ms, 0);
+    __wt_atomic_store_uint32_relaxed(&conn->heuristic_controls.obsolete_tw_btree_count, 0);
+    __wt_atomic_store_uint64_relaxed(&conn->rec_maximum_hs_wrapup_milliseconds, 0);
+    __wt_atomic_store_uint64_relaxed(&conn->rec_maximum_image_build_milliseconds, 0);
+    __wt_atomic_store_uint64_relaxed(&conn->rec_maximum_milliseconds, 0);
+    __wt_atomic_store_uint64_relaxed(&conn->page_delta.max_internal_delta_count, 0);
+    __wt_atomic_store_uint64_relaxed(&conn->page_delta.max_leaf_delta_count, 0);
+}
+
+/*
+ * __checkpoint_pre_txn_work --
+ *     Prepare the cache before starting the checkpoint transaction: age out old data, flush
+ *     external data sources, reduce dirty cache, and log the checkpoint prepare record.
+ */
+static int
+__checkpoint_pre_txn_work(WT_SESSION_IMPL *session, const char *cfg[], bool logging)
+{
+    /*
+     * Update the global oldest ID so we do all possible cleanup.
+     *
+     * This is particularly important for compact, so that all dirty pages can be fully written.
+     */
+    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_UPDATE_OLDEST);
+    WT_RET(__wt_txn_update_oldest(session, WT_TXN_OLDEST_STRICT | WT_TXN_OLDEST_WAIT));
+
+    /* Flush data-sources before we start the checkpoint. */
+    WT_RET(__checkpoint_data_source(session, cfg));
+
+    /*
+     * Try to reduce the amount of dirty data in cache so there is less work do during the critical
+     * section of the checkpoint.
+     */
+    __checkpoint_wait_reduce_dirty_cache(session);
+
+    /* Tell logging that we are about to start a full database checkpoint. */
+    if (logging)
+        WT_RET(__wt_checkpoint_log(session, true, WT_TXN_LOG_CKPT_PREPARE, NULL));
+
+    return (0);
+}
+
+/*
+ * __checkpoint_do_trees --
+ *     Checkpoint all data trees and the history store. Returns the history store dhandles via out
+ *     parameters for use during the subsequent sync phase.
+ */
+static int
+__checkpoint_do_trees(WT_SESSION_IMPL *session, const char *cfg[],
+  WT_DATA_HANDLE **hs_dhandle_outp, WT_DATA_HANDLE **hs_dhandle_shared_outp)
+{
+    struct timespec tsp;
+    WT_CONNECTION_IMPL *conn;
+    WT_DATA_HANDLE *hs_dhandle, *hs_dhandle_shared;
+    WT_DECL_RET;
+    uint64_t hs_ckpt_duration_usecs, time_start_ckpt_tree, time_start_hs, time_stop_ckpt_tree,
+      time_stop_hs;
+
+    conn = S2C(session);
+    hs_dhandle = hs_dhandle_shared = NULL;
+    *hs_dhandle_outp = *hs_dhandle_shared_outp = NULL;
+
+    /* Add a ten second wait to simulate checkpoint slowness. */
+    tsp.tv_sec = 10;
+    tsp.tv_nsec = 0;
+    __checkpoint_timing_stress(session, WT_TIMING_STRESS_CHECKPOINT_SLOW, &tsp);
+
+    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_CKPT_TREE);
+    __checkpoint_verbose_track(session, "checkpointing individual trees");
+
+    time_start_ckpt_tree = __wt_clock(session);
+    WT_ERR(__checkpoint_apply_to_dhandles(session, cfg, __checkpoint_tree_helper));
+    time_stop_ckpt_tree = __wt_clock(session);
+    WT_STAT_CONN_SET(
+      session, checkpoint_tree_duration, WT_CLOCKDIFF_US(time_stop_ckpt_tree, time_start_ckpt_tree));
+
+    /* Wait prior to checkpointing the history store to simulate checkpoint slowness. */
+    __checkpoint_timing_stress(session, WT_TIMING_STRESS_HS_CHECKPOINT_DELAY, &tsp);
+
+    /* Get the handle to the shared history store. */
+    if (__wt_conn_is_disagg(session) && conn->layered_table_manager.leader) {
+        WT_ERR_ERROR_OK(
+          __wt_session_get_dhandle(session, WT_HS_URI_SHARED, NULL, NULL, 0), ENOENT, false);
+        hs_dhandle_shared = session->dhandle;
+    }
+
+    /*
+     * Get a history store dhandle. If the history store file is opened for a special operation this
+     * will return EBUSY which we treat as an error. In scenarios where the history store is not
+     * part of the metadata file (performing recovery on backup folder where no checkpoint
+     * occurred), this will return ENOENT which we ignore and continue.
+     */
+    WT_ERR_ERROR_OK(__wt_session_get_dhandle(session, WT_HS_URI, NULL, NULL, 0), ENOENT, false);
+    hs_dhandle = session->dhandle;
+
+    /*
+     * It is possible that we don't have a history store file in certain recovery scenarios. As such
+     * we could get a dhandle that is not opened.
+     */
+    if (F_ISSET(hs_dhandle, WT_DHANDLE_OPEN)) {
+        time_start_hs = __wt_clock(session);
+        __wt_tsan_suppress_store_bool_v(&conn->txn_global.checkpoint_running_hs, true);
+        WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_HS);
+
+        WT_WITH_DHANDLE(session, hs_dhandle, ret = __wt_checkpoint_file(session, cfg));
+        if (ret != 0)
+            __wt_tsan_suppress_store_bool_v(&conn->txn_global.checkpoint_running_hs, false);
+        WT_ERR(ret);
+
+        if (hs_dhandle_shared != NULL)
+            WT_WITH_DHANDLE(session, hs_dhandle_shared, ret = __wt_checkpoint_file(session, cfg));
+
+        __wt_tsan_suppress_store_bool_v(&conn->txn_global.checkpoint_running_hs, false);
+        WT_ERR(ret);
+
+        time_stop_hs = __wt_clock(session);
+        hs_ckpt_duration_usecs = WT_CLOCKDIFF_US(time_stop_hs, time_start_hs);
+        WT_STAT_CONN_SET(session, txn_hs_ckpt_duration, hs_ckpt_duration_usecs);
+    }
+
+    *hs_dhandle_outp = hs_dhandle;
+    *hs_dhandle_shared_outp = hs_dhandle_shared;
+
+err:
+    return (ret);
+}
+
+/*
+ * __checkpoint_sync_trees --
+ *     Flush all checkpointed trees to disk, including the history store, and update timing
+ *     statistics.
+ */
+static int
+__checkpoint_sync_trees(WT_SESSION_IMPL *session, const char *cfg[], WT_DATA_HANDLE *hs_dhandle,
+  WT_DATA_HANDLE *hs_dhandle_shared)
+{
+    WT_DECL_RET;
+    wt_off_t hs_size;
+    uint64_t fsync_duration_usecs, time_start_fsync, time_stop_fsync;
+
+    __checkpoint_verbose_track(session, "committing transaction");
+
+    /*
+     * Checkpoints have to hit disk (it would be reasonable to configure for lazy checkpoints, but
+     * we don't support them yet).
+     */
+    time_start_fsync = __wt_clock(session);
+
+    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_BM_SYNC);
+    WT_ERR(__checkpoint_apply_to_dhandles(session, cfg, __wt_checkpoint_sync));
+
+    /* Sync the history store file. */
+    if (F_ISSET(hs_dhandle, WT_DHANDLE_OPEN)) {
+        WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_HS_SYNC);
+        WT_WITH_DHANDLE(session, hs_dhandle, ret = __wt_checkpoint_sync(session, NULL));
+        WT_ERR(ret);
+    }
+    if (hs_dhandle_shared != NULL && F_ISSET(hs_dhandle_shared, WT_DHANDLE_OPEN)) {
+        WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_HS_SYNC);
+        WT_WITH_DHANDLE(session, hs_dhandle_shared, ret = __wt_checkpoint_sync(session, NULL));
+        WT_ERR(ret);
+    }
+
+    time_stop_fsync = __wt_clock(session);
+    fsync_duration_usecs = WT_CLOCKDIFF_US(time_stop_fsync, time_start_fsync);
+    WT_STAT_CONN_INCR(session, checkpoint_fsync_post);
+    WT_STAT_CONN_SET(session, checkpoint_fsync_post_duration, fsync_duration_usecs);
+
+    __checkpoint_verbose_track(session, "sync completed");
+
+    /* If the history store file exists on disk, update its statistic. */
+    if (F_ISSET(hs_dhandle, WT_DHANDLE_OPEN)) {
+        WT_ERR(__wt_block_manager_named_size(session, WT_HS_FILE, &hs_size));
+        WT_STAT_CONN_SET(session, cache_hs_ondisk, hs_size);
+    }
+
+err:
+    return (ret);
+}
+
+/*
+ * __checkpoint_write_metadata --
+ *     Commit the checkpoint transaction, flush logs, and write the metadata checkpoint to disk.
+ */
+static int
+__checkpoint_write_metadata(WT_SESSION_IMPL *session, const char *cfg[], bool logging)
+{
+    WT_CONNECTION_IMPL *conn;
+    WT_DECL_RET;
+    struct timespec tsp;
+    void *saved_meta_next;
+
+    conn = S2C(session);
+
+    /*
+     * Commit the transaction now that we are sure that all files in the checkpoint have been
+     * flushed to disk. It's OK to commit before checkpointing the metadata since we know that all
+     * files in the checkpoint are now in a consistent state.
+     */
+    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_COMMIT);
+    WT_ERR(__wt_txn_commit(session, NULL));
+
+    /* Crash before updating the metadata if checkpoint crash point is configured. */
+    if (session->ckpt.crash_trigger_point == CKPT_CRASH_BEFORE_METADATA_UPDATE)
+        __wt_debug_crash(session);
+
+    /*
+     * Flush all the logs that are generated during the checkpoint. It is possible that checkpoint
+     * may include the changes that are written in parallel by an eviction. To have a consistent
+     * view of the data, make sure that all the logs are flushed to disk before the checkpoint is
+     * complete.
+     */
+    if (logging) {
+        /* FIXME-WT-15069: Remove this if condition as part of this FIXME. This is a temporary
+         * workaround to allow ckpt_crash_before_metadata_sync crash point with logging enabled.
+         * test/model currently expects crash points to result in only non-recoverable checkpoints.
+         * However, from WT perspective, a crash after flushing the logs here is still considered
+         * a valid recoverable checkpoint.
+         */
+        /* Crash before metadata sync if checkpoint crash point is configured. */
+        if (session->ckpt.crash_trigger_point == CKPT_CRASH_BEFORE_METADATA_SYNC)
+            __wt_debug_crash(session);
+
+        WT_ERR(__wt_log_flush(session, WT_LOG_FSYNC));
+    }
+
+    /* Crash before metadata sync if checkpoint crash point is configured. */
+    if (session->ckpt.crash_trigger_point == CKPT_CRASH_BEFORE_METADATA_SYNC)
+        __wt_debug_crash(session);
+
+    /*
+     * Stress point to stop just before we sync the metadata file. Used to recreate log recovery
+     * scenarios with an incomplete checkpoint.
+     */
+    WT_STAT_CONN_SET(session, checkpoint_stop_stress_active, 1);
+    tsp.tv_sec = 10;
+    tsp.tv_nsec = 0;
+    /* Wait prior to flush the checkpoint stop log record. */
+    __checkpoint_timing_stress(session, WT_TIMING_STRESS_CHECKPOINT_STOP, &tsp);
+    WT_STAT_CONN_SET(session, checkpoint_stop_stress_active, 0);
+
+    /*
+     * Ensure that the metadata changes are durable before the checkpoint is resolved. Either
+     * checkpointing the metadata or syncing the log file works. Recovery relies on the checkpoint
+     * LSN in the metadata being updated by only checkpoints of all files, i.e. full checkpoints.
+     * Together these require checkpointing the metadata for full checkpoints or partial checkpoints
+     * that include non-logged files, and syncing the log file for only partial checkpoints of
+     * logged files. Since partial checkpoints are not supported, checkpoint the metadata for all
+     * checkpoints.
+     *
+     * This is very similar to __wt_meta_track_off, ideally they would be merged.
+     */
+    session->isolation = session->txn->isolation = WT_ISO_READ_UNCOMMITTED;
+
+    /*
+     * Checkpoint the shared metadata table last, as it could have changed. Also checkpoint it after
+     * we have released the checkpoint transaction. Otherwise, during the checkpoint, we have
+     * reconciled the pages on the tree and may have cleaned them (checkpoint can see its own
+     * uncommitted updates). In that case, we may evict it and the checkpoint transaction cannot
+     * commit as the updates have gone from memory.
+     */
+    if (__wt_conn_is_disagg(session) && conn->layered_table_manager.leader) {
+        WT_ERR(__wt_session_get_dhandle(session, WT_DISAGG_METADATA_URI, NULL, NULL, 0));
+        if (S2BT(session)->modified)
+            WT_ERR(__wt_checkpoint_file(session, cfg));
+    }
+
+    /* Disable metadata tracking during the metadata checkpoint. */
+    saved_meta_next = session->meta_track_next;
+    session->meta_track_next = NULL;
+    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_META_CKPT);
+    WT_WITH_DHANDLE(session, WT_SESSION_META_DHANDLE(session),
+      WT_WITH_METADATA_LOCK(session, ret = __wt_checkpoint_file(session, cfg)));
+    session->meta_track_next = saved_meta_next;
+    WT_ERR(ret);
+
+    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_META_SYNC);
+    WT_WITH_DHANDLE(
+      session, WT_SESSION_META_DHANDLE(session), ret = __wt_checkpoint_sync(session, NULL));
+    WT_ERR(ret);
+
+    __checkpoint_verbose_track(session, "metadata sync completed");
+
+err:
+    return (ret);
+}
+
+/*
+ * __checkpoint_release_handles --
+ *     Release all data handles acquired during the checkpoint. If the checkpoint failed, first mark
+ *     each tree dirty so it will be included in the next checkpoint attempt.
+ */
+static int
+__checkpoint_release_handles(WT_SESSION_IMPL *session, bool failed)
+{
+    WT_DECL_RET;
+    u_int i;
+
+    for (i = 0; i < session->ckpt.handle_next; ++i) {
+        if (session->ckpt.handle[i] == NULL)
+            continue;
+        /*
+         * If the operation failed, mark all trees dirty so they are included if a future checkpoint
+         * can succeed.
+         */
+        if (failed)
+            WT_WITH_DHANDLE(session, session->ckpt.handle[i], __checkpoint_fail_reset(session));
+        WT_WITH_DHANDLE(
+          session, session->ckpt.handle[i], WT_TRET(__wt_session_release_dhandle(session)));
+    }
+
+    return (ret);
+}
+
+/*
  * __checkpoint_db_internal --
  *     Checkpoint a database or a list of objects in the database.
  */
 static int
 __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
 {
-    struct timespec tsp;
     WT_CONFIG_ITEM cval;
     WT_CONNECTION_IMPL *conn;
     WT_DATA_HANDLE *hs_dhandle, *hs_dhandle_shared;
     WT_DECL_RET;
-    WT_EVICT *evict;
     WT_PRECISE_CKPT_SAVED_TRIGGERS precise_ckpt_saved_triggers;
     WT_TXN *txn;
     WT_TXN_GLOBAL *txn_global;
     WT_TXN_ISOLATION saved_isolation;
-    wt_off_t hs_size;
     wt_timestamp_t ckpt_tmp_ts;
+    uint64_t generation;
     size_t namelen;
-    uint64_t ckpt_tree_duration_usecs, fsync_duration_usecs, generation, hs_ckpt_duration_usecs;
-    uint64_t time_start_ckpt_tree, time_start_fsync, time_start_hs, time_stop_ckpt_tree,
-      time_stop_fsync, time_stop_hs;
-    u_int i;
     const char *name;
     bool can_skip, failed, idle, logging, tracking, use_timestamp;
     char ts_string[WT_TS_INT_STRING_SIZE];
-    void *saved_meta_next;
 
     WT_CLEAR(precise_ckpt_saved_triggers);
     conn = S2C(session);
     ckpt_tmp_ts = WT_TS_NONE;
-    evict = conn->evict;
-    hs_size = 0;
     hs_dhandle = hs_dhandle_shared = NULL;
     txn = session->txn;
     txn_global = &conn->txn_global;
@@ -1403,21 +1728,7 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
     logging = F_ISSET(&conn->log_mgr, WT_LOG_ENABLED);
 
     /* Reset the statistics tracked per checkpoint. */
-    __wt_atomic_store_uint64_relaxed(&evict->evict_max_unvisited_gen_gap_per_checkpoint, 0);
-    __wt_atomic_store_uint64_relaxed(&evict->evict_max_visited_gen_gap_per_checkpoint, 0);
-    __wt_atomic_store_uint64_relaxed(&evict->evict_max_clean_page_size_per_checkpoint, 0);
-    __wt_atomic_store_uint64_relaxed(&evict->evict_max_dirty_page_size_per_checkpoint, 0);
-    __wt_atomic_store_uint64_relaxed(&evict->evict_max_updates_page_size_per_checkpoint, 0);
-    __wt_atomic_store_uint64_relaxed(&evict->evict_max_ms_per_checkpoint, 0);
-    __wt_atomic_store_uint16_relaxed(&evict->evict_max_eviction_queue_attempts, 0);
-    __wt_atomic_store_uint16_relaxed(&evict->evict_max_evict_page_attempts, 0);
-    __wt_atomic_store_uint64_relaxed(&evict->reentry_hs_eviction_ms, 0);
-    __wt_atomic_store_uint32_relaxed(&conn->heuristic_controls.obsolete_tw_btree_count, 0);
-    __wt_atomic_store_uint64_relaxed(&conn->rec_maximum_hs_wrapup_milliseconds, 0);
-    __wt_atomic_store_uint64_relaxed(&conn->rec_maximum_image_build_milliseconds, 0);
-    __wt_atomic_store_uint64_relaxed(&conn->rec_maximum_milliseconds, 0);
-    __wt_atomic_store_uint64_relaxed(&conn->page_delta.max_internal_delta_count, 0);
-    __wt_atomic_store_uint64_relaxed(&conn->page_delta.max_leaf_delta_count, 0);
+    __checkpoint_reset_stats(session);
 
     /* Initialize the verbose tracking timer */
     __wt_epoch(session, &conn->ckpt.ckpt_api.timer_start);
@@ -1431,26 +1742,8 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
      */
     __checkpoint_establish_time(session);
 
-    /*
-     * Update the global oldest ID so we do all possible cleanup.
-     *
-     * This is particularly important for compact, so that all dirty pages can be fully written.
-     */
-    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_UPDATE_OLDEST);
-    WT_ERR(__wt_txn_update_oldest(session, WT_TXN_OLDEST_STRICT | WT_TXN_OLDEST_WAIT));
-
-    /* Flush data-sources before we start the checkpoint. */
-    WT_ERR(__checkpoint_data_source(session, cfg));
-
-    /*
-     * Try to reduce the amount of dirty data in cache so there is less work do during the critical
-     * section of the checkpoint.
-     */
-    __checkpoint_wait_reduce_dirty_cache(session);
-
-    /* Tell logging that we are about to start a full database checkpoint. */
-    if (logging)
-        WT_ERR(__wt_checkpoint_log(session, true, WT_TXN_LOG_CKPT_PREPARE, NULL));
+    /* Update oldest ID, flush data sources, reduce dirty cache, and log checkpoint prepare. */
+    WT_ERR(__checkpoint_pre_txn_work(session, cfg, logging));
 
     __checkpoint_verbose_track(session, "starting transaction");
     WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_START_TXN);
@@ -1530,63 +1823,8 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
         WT_ERR(__wt_log_system_backup_id(session));
     }
 
-    /* Add a ten second wait to simulate checkpoint slowness. */
-    tsp.tv_sec = 10;
-    tsp.tv_nsec = 0;
-    __checkpoint_timing_stress(session, WT_TIMING_STRESS_CHECKPOINT_SLOW, &tsp);
-
-    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_CKPT_TREE);
-    __checkpoint_verbose_track(session, "checkpointing individual trees");
-
-    time_start_ckpt_tree = __wt_clock(session);
-    WT_ERR(__checkpoint_apply_to_dhandles(session, cfg, __checkpoint_tree_helper));
-    time_stop_ckpt_tree = __wt_clock(session);
-    ckpt_tree_duration_usecs = WT_CLOCKDIFF_US(time_stop_ckpt_tree, time_start_ckpt_tree);
-    WT_STAT_CONN_SET(session, checkpoint_tree_duration, ckpt_tree_duration_usecs);
-
-    /* Wait prior to checkpointing the history store to simulate checkpoint slowness. */
-    __checkpoint_timing_stress(session, WT_TIMING_STRESS_HS_CHECKPOINT_DELAY, &tsp);
-
-    /* Get the handle to the shared history store. */
-    if (__wt_conn_is_disagg(session) && conn->layered_table_manager.leader) {
-        WT_ERR_ERROR_OK(
-          __wt_session_get_dhandle(session, WT_HS_URI_SHARED, NULL, NULL, 0), ENOENT, false);
-        hs_dhandle_shared = session->dhandle;
-    }
-
-    /*
-     * Get a history store dhandle. If the history store file is opened for a special operation this
-     * will return EBUSY which we treat as an error. In scenarios where the history store is not
-     * part of the metadata file (performing recovery on backup folder where no checkpoint
-     * occurred), this will return ENOENT which we ignore and continue.
-     */
-    WT_ERR_ERROR_OK(__wt_session_get_dhandle(session, WT_HS_URI, NULL, NULL, 0), ENOENT, false);
-    hs_dhandle = session->dhandle;
-
-    /*
-     * It is possible that we don't have a history store file in certain recovery scenarios. As such
-     * we could get a dhandle that is not opened.
-     */
-    if (F_ISSET(hs_dhandle, WT_DHANDLE_OPEN)) {
-        time_start_hs = __wt_clock(session);
-        __wt_tsan_suppress_store_bool_v(&conn->txn_global.checkpoint_running_hs, true);
-        WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_HS);
-
-        WT_WITH_DHANDLE(session, hs_dhandle, ret = __wt_checkpoint_file(session, cfg));
-        if (ret != 0)
-            __wt_tsan_suppress_store_bool_v(&conn->txn_global.checkpoint_running_hs, false);
-        WT_ERR(ret);
-
-        if (hs_dhandle_shared != NULL)
-            WT_WITH_DHANDLE(session, hs_dhandle_shared, ret = __wt_checkpoint_file(session, cfg));
-
-        __wt_tsan_suppress_store_bool_v(&conn->txn_global.checkpoint_running_hs, false);
-        WT_ERR(ret);
-
-        time_stop_hs = __wt_clock(session);
-        hs_ckpt_duration_usecs = WT_CLOCKDIFF_US(time_stop_hs, time_start_hs);
-        WT_STAT_CONN_SET(session, txn_hs_ckpt_duration, hs_ckpt_duration_usecs);
-    }
+    /* Checkpoint all data trees and the history store. */
+    WT_ERR(__checkpoint_do_trees(session, cfg, &hs_dhandle, &hs_dhandle_shared));
 
     /*
      * Copy any updated metadata to the shared metadata table.
@@ -1629,128 +1867,11 @@ __checkpoint_db_internal(WT_SESSION_IMPL *session, const char *cfg[])
     /* Mark all trees as open for business (particularly eviction). */
     WT_ERR(__checkpoint_apply_to_dhandles(session, cfg, __checkpoint_presync));
 
-    __checkpoint_verbose_track(session, "committing transaction");
+    /* Flush all checkpointed trees to disk. */
+    WT_ERR(__checkpoint_sync_trees(session, cfg, hs_dhandle, hs_dhandle_shared));
 
-    /*
-     * Checkpoints have to hit disk (it would be reasonable to configure for lazy checkpoints, but
-     * we don't support them yet).
-     */
-    time_start_fsync = __wt_clock(session);
-
-    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_BM_SYNC);
-    WT_ERR(__checkpoint_apply_to_dhandles(session, cfg, __wt_checkpoint_sync));
-
-    /* Sync the history store file. */
-    if (F_ISSET(hs_dhandle, WT_DHANDLE_OPEN)) {
-        WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_HS_SYNC);
-        WT_WITH_DHANDLE(session, hs_dhandle, ret = __wt_checkpoint_sync(session, NULL));
-        WT_ERR(ret);
-    }
-    if (hs_dhandle_shared != NULL && F_ISSET(hs_dhandle_shared, WT_DHANDLE_OPEN)) {
-        WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_HS_SYNC);
-        WT_WITH_DHANDLE(session, hs_dhandle_shared, ret = __wt_checkpoint_sync(session, NULL));
-        WT_ERR(ret);
-    }
-
-    time_stop_fsync = __wt_clock(session);
-    fsync_duration_usecs = WT_CLOCKDIFF_US(time_stop_fsync, time_start_fsync);
-    WT_STAT_CONN_INCR(session, checkpoint_fsync_post);
-    WT_STAT_CONN_SET(session, checkpoint_fsync_post_duration, fsync_duration_usecs);
-
-    __checkpoint_verbose_track(session, "sync completed");
-
-    /* If the history store file exists on disk, update its statistic. */
-    if (F_ISSET(hs_dhandle, WT_DHANDLE_OPEN)) {
-        WT_ERR(__wt_block_manager_named_size(session, WT_HS_FILE, &hs_size));
-        WT_STAT_CONN_SET(session, cache_hs_ondisk, hs_size);
-    }
-
-    /*
-     * Commit the transaction now that we are sure that all files in the checkpoint have been
-     * flushed to disk. It's OK to commit before checkpointing the metadata since we know that all
-     * files in the checkpoint are now in a consistent state.
-     */
-    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_COMMIT);
-    WT_ERR(__wt_txn_commit(session, NULL));
-
-    /* Crash before updating the metadata if checkpoint crash point is configured. */
-    if (session->ckpt.crash_trigger_point == CKPT_CRASH_BEFORE_METADATA_UPDATE)
-        __wt_debug_crash(session);
-
-    /*
-     * Flush all the logs that are generated during the checkpoint. It is possible that checkpoint
-     * may include the changes that are written in parallel by an eviction. To have a consistent
-     * view of the data, make sure that all the logs are flushed to disk before the checkpoint is
-     * complete.
-     */
-    if (logging) {
-        /* FIXME-WT-15069: Remove this if condition as part of this FIXME. This is a temporary
-         * workaround to allow ckpt_crash_before_metadata_sync crash point with logging enabled.
-         * test/model currently expects crash points to result in only non-recoverable checkpoints.
-         * However, from WT perspective, a crash after flushing the logs here is still considered
-         * a valid recoverable checkpoint.
-         */
-        /* Crash before metadata sync if checkpoint crash point is configured. */
-        if (session->ckpt.crash_trigger_point == CKPT_CRASH_BEFORE_METADATA_SYNC)
-            __wt_debug_crash(session);
-
-        WT_ERR(__wt_log_flush(session, WT_LOG_FSYNC));
-    }
-
-    /* Crash before metadata sync if checkpoint crash point is configured. */
-    if (session->ckpt.crash_trigger_point == CKPT_CRASH_BEFORE_METADATA_SYNC)
-        __wt_debug_crash(session);
-
-    /*
-     * Stress point to stop just before we sync the metadata file. Used to recreate log recovery
-     * scenarios with an incomplete checkpoint.
-     */
-    WT_STAT_CONN_SET(session, checkpoint_stop_stress_active, 1);
-    /* Wait prior to flush the checkpoint stop log record. */
-    __checkpoint_timing_stress(session, WT_TIMING_STRESS_CHECKPOINT_STOP, &tsp);
-    WT_STAT_CONN_SET(session, checkpoint_stop_stress_active, 0);
-
-    /*
-     * Ensure that the metadata changes are durable before the checkpoint is resolved. Either
-     * checkpointing the metadata or syncing the log file works. Recovery relies on the checkpoint
-     * LSN in the metadata being updated by only checkpoints of all files, i.e. full checkpoints.
-     * Together these require checkpointing the metadata for full checkpoints or partial checkpoints
-     * that include non-logged files, and syncing the log file for only partial checkpoints of
-     * logged files. Since partial checkpoints are not supported, checkpoint the metadata for all
-     * checkpoints.
-     *
-     * This is very similar to __wt_meta_track_off, ideally they would be merged.
-     */
-    session->isolation = txn->isolation = WT_ISO_READ_UNCOMMITTED;
-
-    /*
-     * Checkpoint the shared metadata table last, as it could have changed. Also checkpoint it after
-     * we have released the checkpoint transaction. Otherwise, during the checkpoint, we have
-     * reconciled the pages on the tree and may have cleaned them (checkpoint can see its own
-     * uncommitted updates). In that case, we may evict it and the checkpoint transaction cannot
-     * commit as the updates have gone from memory.
-     */
-    if (__wt_conn_is_disagg(session) && conn->layered_table_manager.leader) {
-        WT_ERR(__wt_session_get_dhandle(session, WT_DISAGG_METADATA_URI, NULL, NULL, 0));
-        if (S2BT(session)->modified)
-            WT_ERR(__wt_checkpoint_file(session, cfg));
-    }
-
-    /* Disable metadata tracking during the metadata checkpoint. */
-    saved_meta_next = session->meta_track_next;
-    session->meta_track_next = NULL;
-    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_META_CKPT);
-    WT_WITH_DHANDLE(session, WT_SESSION_META_DHANDLE(session),
-      WT_WITH_METADATA_LOCK(session, ret = __wt_checkpoint_file(session, cfg)));
-    session->meta_track_next = saved_meta_next;
-    WT_ERR(ret);
-
-    WT_STAT_CONN_SET(session, checkpoint_state, WTI_CHECKPOINT_STATE_META_SYNC);
-    WT_WITH_DHANDLE(
-      session, WT_SESSION_META_DHANDLE(session), ret = __wt_checkpoint_sync(session, NULL));
-    WT_ERR(ret);
-
-    __checkpoint_verbose_track(session, "metadata sync completed");
+    /* Commit the checkpoint transaction and write the metadata checkpoint. */
+    WT_ERR(__checkpoint_write_metadata(session, cfg, logging));
 
     /*
      * Now that the metadata is stable, re-open the metadata file for regular eviction by clearing
@@ -1874,18 +1995,7 @@ err:
             return (__wt_panic(session, WT_PANIC, "Failed to advance the checkpoint."));
     }
 
-    for (i = 0; i < session->ckpt.handle_next; ++i) {
-        if (session->ckpt.handle[i] == NULL)
-            continue;
-        /*
-         * If the operation failed, mark all trees dirty so they are included if a future checkpoint
-         * can succeed.
-         */
-        if (failed)
-            WT_WITH_DHANDLE(session, session->ckpt.handle[i], __checkpoint_fail_reset(session));
-        WT_WITH_DHANDLE(
-          session, session->ckpt.handle[i], WT_TRET(__wt_session_release_dhandle(session)));
-    }
+    WT_TRET(__checkpoint_release_handles(session, failed));
 
     if (session->ckpt.drop_list != NULL)
         __wt_scr_free(session, &session->ckpt.drop_list);
