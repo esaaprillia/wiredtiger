@@ -8,6 +8,16 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "connection.h"
+#include "misc.h"
+#include "session.h"
+
+#include "extern_noninline.h"
+
 /*
  * __wt_cond_wait --
  *     Wait on a mutex, optionally timing out.
@@ -232,45 +242,7 @@ __wt_timing_stress(WT_SESSION_IMPL *session, uint64_t flag, struct timespec *tsp
 #endif
 }
 
-/* Maximum stress delay is 1/10 of a second. */
-#define WT_TIMING_STRESS_MAX_DELAY (100000)
-
-/*
- * __wt_timing_stress_sleep_random --
- *     Sleep for a random time, with a bias towards shorter sleeps.
- */
-static WT_INLINE void
-__wt_timing_stress_sleep_random(WT_SESSION_IMPL *session)
-{
-    double pct;
-    uint64_t i, max;
-
-    /*
-     * If there is a lot of cache pressure, don't let the sleep time get too large. If the cache is
-     * totally full, return.
-     */
-    pct = 0.0;
-    if (__wt_evict_needed(session, false, false, false, &pct))
-        max = 5;
-    else
-        max = 9;
-
-    /*
-     * We need a fast way to choose a sleep time. We want to sleep a short period most of the time,
-     * but occasionally wait longer. Divide the maximum period of time into 10 buckets (where bucket
-     * 0 doesn't sleep at all), and roll dice, advancing to the next bucket 50% of the time. That
-     * means we'll hit the maximum roughly every 1K calls.
-     */
-    for (i = 0;;)
-        if (__wt_random(&session->rnd_random) & 0x1 || ++i > max)
-            break;
-
-    if (i == 0)
-        __wt_yield();
-    else
-        /* The default maximum delay is 1/10th of a second. */
-        __wt_sleep(0, i * (WT_TIMING_STRESS_MAX_DELAY / 10));
-}
+/* __wt_timing_stress_sleep_random moved to support/rand.c (non-inline) */
 
 /*
  * __wt_failpoint --

@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "wt_system.h"
+#include "wt_compiler.h"
+
 /*
  * When compiling for code coverage measurement it is necessary to ensure that inline functions in
  * header files that are #included in multiple source files are not inlined.

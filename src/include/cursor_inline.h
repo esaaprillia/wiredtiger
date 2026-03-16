@@ -8,6 +8,13 @@
 
 #pragma once
 
+#include "cursor.h"
+#include "session.h"
+
+#include "btree_inline.h"
+
+#include "extern.h"
+
 /*
  * Define functions that increment histogram statistics for cursor read and write operations
  * latency. These are defined here as two .c files depend on them but there isn't a perfect header
@@ -16,31 +23,9 @@
 WT_STAT_USECS_HIST_INCR_FUNC(opread, perf_hist_opread_latency)
 WT_STAT_USECS_HIST_INCR_FUNC(opwrite, perf_hist_opwrite_latency)
 
-/*
- * __wt_curhs_get_btree --
- *     Convert a history store cursor to the underlying btree.
- */
-static WT_INLINE WT_BTREE *
-__wt_curhs_get_btree(WT_CURSOR *cursor)
-{
-    WT_CURSOR_HS *hs_cursor;
-    hs_cursor = (WT_CURSOR_HS *)cursor;
+/* __wt_curhs_get_btree moved to non-inline */
 
-    return (CUR2BT(hs_cursor->file_cursor));
-}
-
-/*
- * __wt_curhs_get_cbt --
- *     Convert a history store cursor to the underlying btree cursor.
- */
-static WT_INLINE WT_CURSOR_BTREE *
-__wt_curhs_get_cbt(WT_CURSOR *cursor)
-{
-    WT_CURSOR_HS *hs_cursor;
-    hs_cursor = (WT_CURSOR_HS *)cursor;
-
-    return ((WT_CURSOR_BTREE *)hs_cursor->file_cursor);
-}
+/* __wt_curhs_get_cbt moved to non-inline */
 
 /*
  * __cursor_set_recno --
@@ -89,30 +74,7 @@ __cursor_novalue(WT_CURSOR *cursor)
     F_CLR(cursor, WT_CURSTD_VALUE_INT);
 }
 
-/*
- * __wt_cursor_bound_reset --
- *     Clear any bounds on the cursor if they are set.
- */
-static WT_INLINE void
-__wt_cursor_bound_reset(WT_CURSOR *cursor)
-{
-    WT_SESSION_IMPL *session;
-
-    session = CUR2S(cursor);
-
-    /* Clear bounds if they are set. */
-    if (WT_CURSOR_BOUNDS_SET(cursor)) {
-        WT_STAT_CONN_DSRC_INCR(session, cursor_bounds_reset);
-        /* Clear upper bound, and free the buffer. */
-        F_CLR(cursor, WT_CURSTD_BOUND_UPPER | WT_CURSTD_BOUND_UPPER_INCLUSIVE);
-        __wt_buf_free(session, &cursor->upper_bound);
-        WT_CLEAR(cursor->upper_bound);
-        /* Clear lower bound, and free the buffer. */
-        F_CLR(cursor, WT_CURSTD_BOUND_LOWER | WT_CURSTD_BOUND_LOWER_INCLUSIVE);
-        __wt_buf_free(session, &cursor->lower_bound);
-        WT_CLEAR(cursor->lower_bound);
-    }
-}
+/* __wt_cursor_bound_reset moved to non-inline */
 
 /*
  * __cursor_checkkey --
@@ -382,26 +344,7 @@ __wt_cursor_dhandle_incr_use(WT_SESSION_IMPL *session)
         __wt_tsan_suppress_store_uint64(&dhandle->timeofdeath, 0);
 }
 
-/*
- * __wt_cursor_dhandle_decr_use --
- *     Decrement the in-use counter in the cursor's data source.
- */
-static WT_INLINE void
-__wt_cursor_dhandle_decr_use(WT_SESSION_IMPL *session)
-{
-    WT_DATA_HANDLE *dhandle;
-
-    dhandle = session->dhandle;
-
-    /*
-     * If we close a handle with a time of death set, clear it. The ordering is important: after
-     * decrementing the use count, there's a chance that the data handle can be freed.
-     */
-    WT_ASSERT(session, __wt_atomic_load_int32_relaxed(&dhandle->session_inuse) > 0);
-    if (dhandle->timeofdeath != 0 && __wt_atomic_load_int32_relaxed(&dhandle->session_inuse) == 1)
-        dhandle->timeofdeath = 0;
-    (void)__wt_atomic_sub_int32(&dhandle->session_inuse, 1);
-}
+/* __wt_cursor_dhandle_decr_use moved to non-inline */
 
 /*
  * __wt_cursor_uri_incr_use --
@@ -475,29 +418,7 @@ __wt_cursor_func_init(WT_CURSOR_BTREE *cbt, bool reenter)
     return (0);
 }
 
-/*
- * __wt_cursor_free_cached_memory --
- *     If a cached cursor is still holding memory, free it now.
- */
-static WT_INLINE void
-__wt_cursor_free_cached_memory(WT_CURSOR *cursor)
-{
-    WT_SESSION_IMPL *session;
-
-    if (F_ISSET(cursor, WT_CURSTD_CACHED_WITH_MEM)) {
-        session = CUR2S(cursor);
-
-        /* Don't keep buffers allocated for cached cursors. */
-        __wt_buf_free(session, &cursor->key);
-        __wt_buf_free(session, &cursor->value);
-
-        /* Discard the underlying WT_CURSOR_BTREE buffers. */
-        if (!WT_PREFIX_MATCH(cursor->internal_uri, "layered:"))
-            __wt_btcur_free_cached_memory((WT_CURSOR_BTREE *)cursor);
-
-        F_CLR(cursor, WT_CURSTD_CACHED_WITH_MEM);
-    }
-}
+/* __wt_cursor_free_cached_memory moved to non-inline */
 
 /*
  * __wt_cursor_has_cached_memory --

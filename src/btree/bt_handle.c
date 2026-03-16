@@ -1305,3 +1305,134 @@ __wt_btree_switch_object(WT_SESSION_IMPL *session, uint32_t objectid)
     bm = btree->bm;
     return (bm == NULL ? 0 : bm->switch_object(bm, session, objectid));
 }
+
+/*
+ * __wt_page_is_modified --
+ *     Return if the page is dirty.
+ */
+bool
+__wt_page_is_modified(WT_PAGE *page)
+{
+    return (page->modify != NULL &&
+      __wt_atomic_load_uint32_relaxed(&page->modify->page_state) != WT_PAGE_CLEAN);
+}
+
+/*
+ * __wt_btree_dirty_intl_inuse --
+ *     Return the number of bytes in use by dirty internal pages.
+ */
+uint64_t
+__wt_btree_dirty_intl_inuse(WT_SESSION_IMPL *session)
+{
+    WT_BTREE *btree;
+    WT_CACHE *cache;
+
+    btree = S2BT(session);
+    cache = S2C(session)->cache;
+
+    return (__wt_cache_bytes_plus_overhead(
+      cache, __wt_atomic_load_uint64_relaxed(&btree->bytes_dirty_intl)));
+}
+
+/*
+ * __wt_btree_shared --
+ *     Given a tree's URI and config, determine whether it's shared.
+ */
+int
+__wt_btree_shared(WT_SESSION_IMPL *session, const char *uri, const char **bt_cfg, bool *shared)
+{
+    WT_CONFIG_ITEM cval;
+
+    WT_ASSERT(session, shared != NULL);
+    *shared = false;
+
+    WT_RET(__wt_config_gets(session, bt_cfg, "block_manager", &cval));
+    *shared = (WT_SUFFIX_MATCH(uri, ".wt_stable") || WT_CONFIG_LIT_MATCH("disagg", cval));
+
+    return (0);
+}
+
+/*
+ * __wt_btree_increase_size --
+ *     Increase the size of the tree.
+ */
+void
+__wt_btree_increase_size(WT_SESSION_IMPL *session, uint64_t size)
+{
+    (void)__wt_atomic_add_uint64(&S2BT(session)->bytes_total, size);
+}
+
+/*
+ * __wt_btree_shared_base_name --
+ *     Given a tree's URI, break it down into its base name.
+ */
+int
+__wt_btree_shared_base_name(
+  WT_SESSION_IMPL *session, const char **namep, const char **checkpointp, WT_ITEM **name_bufp)
+{
+    WT_ITEM *name_buf;
+    size_t len;
+    const char *name, *suffix;
+
+    name = *namep;
+
+    suffix = strstr(name, ".wt_stable/");
+    if (suffix == NULL)
+        return (0);
+
+    suffix += strlen(".wt_stable");
+    len = (size_t)(suffix - name);
+    WT_RET(__wt_scr_alloc(session, len + 1, name_bufp));
+    name_buf = *name_bufp;
+    WT_RET(__wt_buf_catfmt(session, name_buf, "%s", name));
+    ((char *)name_buf->data)[len] = '\0';
+
+    *namep = (const char *)name_buf->data;
+
+    if (checkpointp != NULL)
+        *checkpointp = suffix + 1;
+
+    return (0);
+}
+
+/*
+ * __wt_tree_modify_set --
+ *     Mark the tree dirty.
+ */
+void
+__wt_tree_modify_set(WT_SESSION_IMPL *session)
+{
+    WT_BTREE *btree;
+    WT_CONNECTION_IMPL *conn;
+
+    btree = S2BT(session);
+    conn = S2C(session);
+
+    if (F_ISSET(btree, WT_BTREE_READONLY))
+        return;
+
+    WT_ASSERT(
+      session, !F_ISSET(btree, WT_BTREE_DISAGGREGATED) || conn->layered_table_manager.leader);
+
+    if (!btree->modified) {
+        WT_ASSERT(session, !WT_READING_CHECKPOINT(session));
+
+        if (WT_SESSION_BTREE_SYNC(session) && !WT_IS_METADATA(session->dhandle) &&
+          !WT_IS_DISAGG_META(session->dhandle) &&
+          !FLD_ISSET(conn->timing_stress_flags, WT_TIMING_STRESS_CHECKPOINT_EVICT_PAGE)) {
+            WT_ASSERT_ALWAYS(session, !F_ISSET(session, WT_SESSION_ROLLBACK_TO_STABLE), "%s",
+              "A btree is marked dirty during RTS");
+            WT_ASSERT_ALWAYS(session,
+              !F_ISSET(conn, WT_CONN_RECOVERING) &&
+                !F_ISSET_ATOMIC_32(conn, WT_CONN_CLOSING_CHECKPOINT),
+              "%s", "A btree is marked dirty during recovery or shutdown");
+        }
+        btree->modified = true;
+        WT_FULL_BARRIER();
+
+        WT_DIAGNOSTIC_YIELD;
+    }
+
+    if (!conn->modified)
+        conn->modified = true;
+}

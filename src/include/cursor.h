@@ -8,6 +8,13 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "btmem.h"
+#include "timestamp.h"
+#include "stat.h"
+#include "misc.h"
+#include "queue.h"
+
 /* Get the session from any cursor. */
 #define CUR2S(c) ((WT_SESSION_IMPL *)((WT_CURSOR *)c)->session)
 

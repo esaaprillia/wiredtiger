@@ -8,33 +8,19 @@
 
 #pragma once
 
-/*
- * __wt_txn_context_prepare_check --
- *     Return an error if the current transaction is in the prepare state.
- */
-static WT_INLINE int
-__wt_txn_context_prepare_check(WT_SESSION_IMPL *session)
-{
-    if (F_ISSET(session->txn, WT_TXN_PREPARE_IGNORE_API_CHECK))
-        return (0);
-    if (F_ISSET(session->txn, WT_TXN_PREPARE))
-        WT_RET_MSG(session, EINVAL, "not permitted in a prepared transaction");
-    return (0);
-}
+#include "btmem.h"
+#include "connection.h"
+#include "session.h"
+#include "txn.h"
 
-/*
- * __wt_txn_context_check --
- *     Complain if a transaction is/isn't running.
- */
-static WT_INLINE int
-__wt_txn_context_check(WT_SESSION_IMPL *session, bool requires_txn)
-{
-    if (requires_txn && !F_ISSET(session->txn, WT_TXN_RUNNING))
-        WT_RET_MSG(session, EINVAL, "only permitted in a running transaction");
-    if (!requires_txn && F_ISSET(session->txn, WT_TXN_RUNNING))
-        WT_RET_MSG(session, EINVAL, "not permitted in a running transaction");
-    return (0);
-}
+#include "generation_inline.h"
+#include "ref_inline.h"
+
+#include "extern.h"
+
+/* __wt_txn_context_prepare_check moved to txn/txn.c (non-inline) */
+
+/* __wt_txn_context_check moved to non-inline */
 
 /*
  * __wt_txn_log_op_check --
@@ -71,28 +57,7 @@ __wt_txn_log_op_check(WT_SESSION_IMPL *session)
     return (true);
 }
 
-/*
- * __wt_txn_err_set --
- *     Set an error in the current transaction.
- */
-static WT_INLINE void
-__wt_txn_err_set(WT_SESSION_IMPL *session, int ret)
-{
-    WT_TXN *txn;
-
-    txn = session->txn;
-
-    /*  Ignore standard errors that don't fail the transaction. */
-    if (ret == WT_NOTFOUND || ret == WT_DUPLICATE_KEY || ret == WT_PREPARE_CONFLICT)
-        return;
-
-    /* Less commonly, it's not a running transaction. */
-    if (!F_ISSET(txn, WT_TXN_RUNNING))
-        return;
-
-    /* The transaction has to be rolled back. */
-    F_SET(txn, WT_TXN_ERROR);
-}
+/* __wt_txn_err_set moved to txn/txn.c (non-inline) */
 
 /*
  * __wt_txn_op_set_recno --
@@ -817,57 +782,7 @@ err:
     return (ret);
 }
 
-/*
- * __wt_txn_oldest_id --
- *     Return the oldest transaction ID that has to be kept for the current tree.
- */
-static WT_INLINE uint64_t
-__wt_txn_oldest_id(WT_SESSION_IMPL *session)
-{
-    WT_CONNECTION_IMPL *conn;
-    WT_TXN_GLOBAL *txn_global;
-    uint64_t checkpoint_pinned, oldest_id, recovery_ckpt_snap_min;
-
-    conn = S2C(session);
-    txn_global = &conn->txn_global;
-
-    /*
-     * The metadata is tracked specially because of optimizations for checkpoints.
-     */
-    if (session->dhandle != NULL && WT_IS_METADATA(session->dhandle))
-        return (__wt_atomic_load_uint64_v_relaxed(&txn_global->metadata_pinned));
-
-    /*
-     * Take a local copy of these IDs in case they are updated while we are checking visibility. The
-     * read of the transaction ID pinned by a checkpoint needs to be carefully ordered: if a
-     * checkpoint is starting and we have to start checking the pinned ID, we take the minimum of it
-     * with the oldest ID, which is what we want. The logged tables are excluded as part of RTS, so
-     * there is no need of holding their oldest_id
-     */
-    WT_ACQUIRE_READ_WITH_BARRIER(oldest_id, txn_global->oldest_id);
-
-    if (!F_ISSET(conn, WT_CONN_RECOVERING) || session->dhandle == NULL ||
-      F_ISSET(S2BT(session), WT_BTREE_LOGGED)) {
-        /*
-         * Checkpoint transactions often fall behind ordinary application threads. If there is an
-         * active checkpoint, keep changes until checkpoint is finished.
-         */
-        checkpoint_pinned =
-          __wt_atomic_load_uint64_v_relaxed(&txn_global->checkpoint_txn_shared.pinned_id);
-        if (checkpoint_pinned == WT_TXN_NONE || oldest_id < checkpoint_pinned)
-            return (oldest_id);
-        return (checkpoint_pinned);
-    } else {
-        /*
-         * Recovered checkpoint snapshot rarely fall behind ordinary application threads. Keep the
-         * changes until the recovery is finished.
-         */
-        recovery_ckpt_snap_min = conn->recovery_ckpt_snap_min;
-        if (recovery_ckpt_snap_min == WT_TXN_NONE || oldest_id < recovery_ckpt_snap_min)
-            return (oldest_id);
-        return (recovery_ckpt_snap_min);
-    }
-}
+/* __wt_txn_oldest_id moved to non-inline */
 
 /*
  * __wt_txn_pinned_stable_timestamp --
@@ -907,159 +822,13 @@ __wt_txn_pinned_stable_timestamp(WT_SESSION_IMPL *session)
     return (pinned_stable_ts);
 }
 
-/*
- * __wt_txn_pinned_timestamp --
- *     Get the first timestamp that has to be kept for the current tree.
- */
-static WT_INLINE void
-__wt_txn_pinned_timestamp(WT_SESSION_IMPL *session, wt_timestamp_t *pinned_tsp)
-{
-    WT_TXN_GLOBAL *txn_global;
-    wt_timestamp_t checkpoint_ts, pinned_ts;
-    bool has_pinned_timestamp;
+/* __wt_txn_pinned_timestamp moved to non-inline */
 
-    txn_global = &S2C(session)->txn_global;
+/* __txn_visible_all_id moved to non-inline */
 
-    /*
-     * There is no need to go further if no pinned timestamp has been set yet.
-     */
-    has_pinned_timestamp = __wt_atomic_load_bool_acquire(&txn_global->has_pinned_timestamp);
-    if (!has_pinned_timestamp) {
-        *pinned_tsp = WT_TS_NONE;
-        return;
-    }
+/* __wt_txn_timestamp_visible_all moved to non-inline */
 
-    /* If we have a version cursor open, use the pinned timestamp when it is opened. */
-    if (S2C(session)->version_cursor_count > 0) {
-        *pinned_tsp = txn_global->version_cursor_pinned_timestamp;
-        return;
-    }
-
-    /*
-     * It is important to ensure we only read the global pinned timestamp once. Otherwise, we may
-     * return a pinned timestamp that is larger than the checkpoint timestamp. For example, the
-     * first time we read the global pinned timestamp as 100 and set it to the local variable
-     * pinned_ts. If the checkpoint timestamp is 110 and the second time we read the global pinned
-     * timestamp as 120, we will return 120 instead of the checkpoint timestamp 110.
-     */
-    pinned_ts = __wt_atomic_load_uint64_acquire(&txn_global->pinned_timestamp);
-
-    /*
-     * The read of checkpoint timestamp needs to be carefully ordered: it needs to be after we have
-     * read the pinned timestamp, otherwise, we may read earlier checkpoint timestamp resulting more
-     * data being pinned. If a checkpoint is starting and we have to use the checkpoint timestamp,
-     * we take the minimum of it with the oldest timestamp, which is what we want.
-     */
-    checkpoint_ts = txn_global->checkpoint_timestamp;
-
-    if (checkpoint_ts != WT_TS_NONE && checkpoint_ts < pinned_ts)
-        *pinned_tsp = checkpoint_ts;
-    else
-        *pinned_tsp = pinned_ts;
-}
-
-/*
- * __txn_visible_all_id --
- *     Check if a given transaction ID is "globally visible". This is, if all sessions in the system
- *     will see the transaction ID including the ID that belongs to a running checkpoint.
- */
-static WT_INLINE bool
-__txn_visible_all_id(WT_SESSION_IMPL *session, uint64_t id)
-{
-    WT_TXN *txn;
-    uint64_t oldest_id;
-
-    txn = session->txn;
-
-    /* Make sure that checkpoint cursor transactions only read checkpoints, except for metadata. */
-    WT_ASSERT(session,
-      (session->dhandle != NULL && WT_IS_METADATA(session->dhandle)) ||
-        WT_READING_CHECKPOINT(session) == F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT));
-
-    /*
-     * When reading from a checkpoint, all readers use the same snapshot, so a transaction is
-     * globally visible if it is visible in that snapshot. Note that this can cause things that were
-     * not globally visible yet when the checkpoint is taken to become globally visible in the
-     * checkpoint. This is expected (it is like all the old running transactions exited) -- but note
-     * that it's important that the inverse change (something globally visible when the checkpoint
-     * was taken becomes not globally visible in the checkpoint) never happen as this violates basic
-     * assumptions about visibility. (And, concretely, it can cause stale history store entries to
-     * come back to life and produce wrong answers.)
-     *
-     * Note: we use the transaction to check this rather than testing WT_READING_CHECKPOINT because
-     * reading the metadata while working with a checkpoint cursor will borrow the transaction; it
-     * then ends up using it to read a non-checkpoint tree. This is believed to be ok because the
-     * metadata is always read-uncommitted, but we want to still use the checkpoint-cursor
-     * visibility logic. Using the regular visibility logic with a checkpoint cursor transaction can
-     * be logically invalid (it is possible that way for something to be globally visible but
-     * specifically invisible) and also can end up comparing transaction ids from different database
-     * opens.
-     */
-    if (F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT))
-        return (
-          __wt_txn_visible_id_snapshot(id, txn->snapshot_data.snap_min, txn->snapshot_data.snap_max,
-            txn->snapshot_data.snapshot, txn->snapshot_data.snapshot_count));
-    oldest_id = __wt_txn_oldest_id(session);
-
-    return (id < oldest_id);
-}
-
-/*
- * __wt_txn_timestamp_visible_all --
- *     Check whether a given timestamp is either globally visible or obsolete.
- */
-static WT_INLINE bool
-__wt_txn_timestamp_visible_all(WT_SESSION_IMPL *session, wt_timestamp_t timestamp)
-{
-    wt_timestamp_t pinned_ts;
-
-    /* Compare the given timestamp to the pinned timestamp, if it exists. */
-    __wt_txn_pinned_timestamp(session, &pinned_ts);
-
-    return (pinned_ts != WT_TS_NONE && timestamp <= pinned_ts);
-}
-
-/*
- * __wt_txn_visible_all --
- *     Check whether a given time window is either globally visible or obsolete. For global
- *     visibility checks, the commit times are checked against the oldest possible readers in the
- *     system. If all possible readers could always see the time window - it is globally visible.
- *     For obsolete checks callers should generally pass in the durable timestamp, since it is
- *     guaranteed to be newer than or equal to the commit time, and content needs to be retained
- *     (not become obsolete) until both the commit and durable times are obsolete. If the commit
- *     time is used for this check, it's possible that a transaction is committed with a durable
- *     time and made obsolete before it can be included in a checkpoint - which leads to bugs in
- *     checkpoint correctness.
- */
-static WT_INLINE bool
-__wt_txn_visible_all(WT_SESSION_IMPL *session, uint64_t id, wt_timestamp_t timestamp)
-{
-    /*
-     * When shutting down, the transactional system has finished running and all we care about is
-     * eviction, make everything visible.
-     */
-    if (F_ISSET_ATOMIC_32(S2C(session), WT_CONN_CLOSING))
-        return (true);
-
-    if (!__txn_visible_all_id(session, id))
-        return (false);
-
-    /* Timestamp check. */
-    if (timestamp == WT_TS_NONE)
-        return (true);
-
-    /* Make sure that checkpoint cursor transactions only read checkpoints, except for metadata. */
-    WT_ASSERT(session,
-      (session->dhandle != NULL && WT_IS_METADATA(session->dhandle)) ||
-        WT_READING_CHECKPOINT(session) == F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT));
-
-    /* When reading a checkpoint, use the checkpoint state instead of the current state. */
-    if (F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT))
-        return (session->txn->checkpoint_oldest_timestamp != WT_TS_NONE &&
-          timestamp <= session->txn->checkpoint_oldest_timestamp);
-
-    return (__wt_txn_timestamp_visible_all(session, timestamp));
-}
+/* __wt_txn_visible_all moved to non-inline */
 
 /*
  * __wt_txn_has_newest_and_visible_all --
@@ -1193,36 +962,7 @@ __wt_txn_tw_stop_visible_all(WT_SESSION_IMPL *session, WT_TIME_WINDOW *tw)
       __wt_txn_visible_all(session, tw->stop_txn, tw->durable_stop_ts));
 }
 
-/*
- * __wt_txn_visible_id_snapshot --
- *     Is the id visible in terms of the given snapshot?
- */
-static WT_INLINE bool
-__wt_txn_visible_id_snapshot(
-  uint64_t id, uint64_t snap_min, uint64_t snap_max, uint64_t *snapshot, uint32_t snapshot_count)
-{
-    bool found;
-
-    /*
-     * WT_ISO_SNAPSHOT, WT_ISO_READ_COMMITTED: the ID is visible if it is not the result of a
-     * concurrent transaction, that is, if was committed before the snapshot was taken.
-     *
-     * The order here is important: anything newer than or equal to the maximum ID we saw when
-     * taking the snapshot should be invisible, even if the snapshot is empty.
-     *
-     * Snapshot data:
-     *	ids >= snap_max not visible,
-     *	ids < snap_min are visible,
-     *	everything else is visible unless it is found in the snapshot.
-     */
-    if (snap_max <= id)
-        return (false);
-    if (snapshot_count == 0 || id < snap_min)
-        return (true);
-
-    WT_BINARY_SEARCH(id, snapshot, snapshot_count, found);
-    return (!found);
-}
+/* __wt_txn_visible_id_snapshot moved to non-inline */
 
 /*
  * __txn_visible_id --
@@ -1395,56 +1135,7 @@ __wt_txn_upd_visible(WT_SESSION_IMPL *session, WT_UPDATE *upd)
     return (__wt_txn_upd_visible_type(session, upd) == WT_VISIBLE_TRUE);
 }
 
-/*
- * __wt_upd_alloc --
- *     Allocate a WT_UPDATE structure and associated value and fill it in.
- */
-static WT_INLINE int
-__wt_upd_alloc(WT_SESSION_IMPL *session, const WT_ITEM *value, u_int modify_type, WT_UPDATE **updp,
-  size_t *sizep)
-{
-    WT_UPDATE *upd;
-    size_t allocsz; /* Allocation size in bytes. */
-
-    *updp = NULL;
-
-    /*
-     * The code paths leading here are convoluted: assert we never attempt to allocate an update
-     * structure if only intending to insert one we already have, or pass in a value with a type
-     * that doesn't support values.
-     */
-    WT_ASSERT(session, modify_type != WT_UPDATE_INVALID);
-    WT_ASSERT(session,
-      (value == NULL && (modify_type == WT_UPDATE_RESERVE || modify_type == WT_UPDATE_TOMBSTONE)) ||
-        (value != NULL &&
-          !(modify_type == WT_UPDATE_RESERVE || modify_type == WT_UPDATE_TOMBSTONE)));
-
-    if (value == NULL || value->size == 0)
-        allocsz = WT_UPDATE_SIZE_NOVALUE;
-    else
-        allocsz = WT_UPDATE_SIZE + value->size;
-
-    /*
-     * Allocate the WT_UPDATE structure and room for the value, then copy any value into place.
-     * Memory is cleared, which is the equivalent of setting:
-     *    WT_UPDATE.txnid = WT_TXN_NONE;
-     *    WT_UPDATE.durable_ts = WT_TS_NONE;
-     *    WT_UPDATE.start_ts = WT_TS_NONE;
-     *    WT_UPDATE.prepare_state = WT_PREPARE_INIT;
-     *    WT_UPDATE.flags = 0;
-     */
-    WT_RET(__wt_calloc(session, 1, allocsz, &upd));
-    if (value != NULL && value->size != 0) {
-        __wt_tsan_suppress_store_uint32(&upd->size, WT_STORE_SIZE(value->size));
-        memcpy(upd->data, value->data, value->size);
-    }
-    upd->type = (uint8_t)modify_type;
-
-    *updp = upd;
-    if (sizep != NULL)
-        *sizep = WT_UPDATE_MEMSIZE(upd);
-    return (0);
-}
+/* __wt_upd_alloc moved to non-inline */
 
 /*
  * __wt_upd_alloc_tombstone --
@@ -2398,36 +2089,7 @@ __wt_txn_cursor_op(WT_SESSION_IMPL *session)
         __wt_txn_get_snapshot(session);
 }
 
-/*
- * __wt_txn_activity_check --
- *     Check whether there are any running transactions.
- */
-static WT_INLINE int
-__wt_txn_activity_check(WT_SESSION_IMPL *session, bool *txn_active)
-{
-    WT_TXN_GLOBAL *txn_global;
-
-    txn_global = &S2C(session)->txn_global;
-
-    /*
-     * Default to true - callers shouldn't rely on this if an error is returned, but let's give them
-     * deterministic behavior if they do.
-     */
-    *txn_active = true;
-
-    /*
-     * Ensure the oldest ID is as up to date as possible so we can use a simple check to find if
-     * there are any running transactions.
-     */
-    WT_RET(__wt_txn_update_oldest(session, WT_TXN_OLDEST_STRICT | WT_TXN_OLDEST_WAIT));
-
-    *txn_active = (__wt_atomic_load_uint64_v_relaxed(&txn_global->oldest_id) !=
-        __wt_atomic_load_uint64_v_relaxed(&txn_global->current) ||
-      __wt_atomic_load_uint64_v_relaxed(&txn_global->metadata_pinned) !=
-        __wt_atomic_load_uint64_v_relaxed(&txn_global->current));
-
-    return (0);
-}
+/* __wt_txn_activity_check moved to non-inline */
 
 /*
  * __wt_upd_value_assign --

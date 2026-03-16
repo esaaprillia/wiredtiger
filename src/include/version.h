@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "wt_system.h"
+#include "wt_fwd.h"
+#include "misc.h"
+
 /*
  * WT_VERSION --
  *	Structure to represent version information.

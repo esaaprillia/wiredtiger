@@ -6,7 +6,20 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "misc.h"
+#include "os.h"
+#include "error.h"
+#include "verbose.h"
+#include "block.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "extern_posix.h"
 
 /*
  * __wti_posix_map --

@@ -8,6 +8,18 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "wt_compiler.h"
+#include "hardware.h"
+#include "misc.h"
+#include "error.h"
+#include "stat.h"
+#ifdef _WIN32
+#include "os_windows.h"
+#else
+#include "posix.h"
+#endif
+
 /*
  * Condition variables:
  *

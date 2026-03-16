@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "misc.h"
+#include "mutex.h"
+
 /* AUTOMATIC FLAG VALUE GENERATION START 0 */
 #define WT_LOGSCAN_FIRST 0x01u
 #define WT_LOGSCAN_FROM_CKP 0x02u
@@ -183,6 +187,8 @@ struct __wt_log_manager {
 
 extern int __wt_curlog_open(WT_SESSION_IMPL *session, const char *uri, const char *cfg[],
   WT_CURSOR **cursorp) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern int __wt_log_cmp(WT_LSN *lsn1, WT_LSN *lsn2)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_log_compat_verify(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_log_filename(WT_SESSION_IMPL *session, uint32_t id, const char *file_prefix,
@@ -319,22 +325,18 @@ extern int __wt_logrec_alloc(WT_SESSION_IMPL *session, size_t size, WT_ITEM **lo
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_logrec_read(WT_SESSION_IMPL *session, const uint8_t **pp, const uint8_t *end,
   uint32_t *rectypep) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern int __wt_lsn_string(WT_LSN *lsn, size_t len, char *buf)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_txn_op_printlog(WT_SESSION_IMPL *session, const uint8_t **pp, const uint8_t *end,
   WT_TXN_PRINTLOG_ARGS *args) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wt_verbose_dump_log(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern uint32_t __wt_lsn_file(WT_LSN *lsn) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern uint32_t __wt_lsn_offset(WT_LSN *lsn) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern void __wt_log_ckpt(WT_SESSION_IMPL *session, WT_LSN *ckpt_lsn);
 extern void __wt_log_written_reset(WT_SESSION_IMPL *session);
 extern void __wt_logmgr_compat_version(WT_SESSION_IMPL *session);
 extern void __wt_logrec_free(WT_SESSION_IMPL *session, WT_ITEM **logrecp);
-static WT_INLINE int __wt_log_cmp(WT_LSN *lsn1, WT_LSN *lsn2)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE int __wt_lsn_string(WT_LSN *lsn, size_t len, char *buf)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE uint32_t __wt_lsn_file(WT_LSN *lsn)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE uint32_t __wt_lsn_offset(WT_LSN *lsn)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 
 #ifdef HAVE_UNITTEST
 

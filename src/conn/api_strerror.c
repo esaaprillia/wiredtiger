@@ -1,6 +1,21 @@
 /* DO NOT EDIT: automatically built by dist/api_err.py. */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "extern_noninline.h"
+#ifdef _WIN32
+#include "extern_win.h"
+#else
+#include "extern_posix.h"
+#ifdef __linux__
+#include "extern_linux.h"
+#elif __APPLE__
+#include "extern_darwin.h"
+#endif
+#endif
 
 /*
  * Historically, there was only the wiredtiger_strerror call because the POSIX port didn't need

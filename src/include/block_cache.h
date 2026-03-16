@@ -8,6 +8,16 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "misc.h"
+#include "mutex.h"
+#include "queue.h"
+#ifdef _WIN32
+#include "os_windows.h"
+#else
+#include "posix.h"
+#endif
+
 /*
  * WiredTiger's block cache. It is used to cache blocks identical to those that live on disk in a
  * faster storage medium, such as NVRAM.

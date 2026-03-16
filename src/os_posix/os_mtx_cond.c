@@ -6,7 +6,22 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "hardware.h"
+#include "misc.h"
+#include "os.h"
+#include "mutex.h"
+#include "error.h"
+#include "stat.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "mutex_inline.h"
+#include "extern_posix.h"
 
 /*
  * __wt_cond_alloc --

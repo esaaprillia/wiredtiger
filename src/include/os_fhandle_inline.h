@@ -8,6 +8,19 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "misc.h"
+#include "os.h"
+#include "stat.h"
+#include "session.h"
+#include "connection.h"
+
+#include "extern_noninline.h"
+#include "time_inline.h"
+
 /*
  * Define functions that increment histogram statistics for filesystem operations latency.
  */

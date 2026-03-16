@@ -6,7 +6,34 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "misc.h"
+#include "meta.h"
+#include "error.h"
+#include "verbose.h"
+#include "dhandle.h"
+#include "schema.h"
+#include "btree.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "buf_inline.h"
+#include "mutex_inline.h"
+#include "os_fs_inline.h"
+#ifdef _WIN32
+#include "extern_win.h"
+#else
+#include "extern_posix.h"
+#ifdef __linux__
+#include "extern_linux.h"
+#elif __APPLE__
+#include "extern_darwin.h"
+#endif
+#endif
 
 #define WT_CONFLICT_BACKUP_MSG "the table is currently performing backup and cannot be dropped"
 #define WT_CONFLICT_DHANDLE_MSG "another thread is currently holding the data handle of the table"

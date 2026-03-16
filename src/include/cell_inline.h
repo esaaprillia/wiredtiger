@@ -7,6 +7,17 @@
  */
 #pragma once
 
+#include "btmem.h"
+#include "cell.h"
+#include "session.h"
+#include "timestamp.h"
+
+#include "buf_inline.h"
+#include "intpack_inline.h"
+#include "timestamp_inline.h"
+
+#include "extern.h"
+
 /*
  * __cell_check_value_validity --
  *     Check the value's validity window for sanity.

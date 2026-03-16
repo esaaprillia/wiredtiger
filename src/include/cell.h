@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "timestamp.h"
+#include "misc.h"
+
 /*
  * WT_CELL --
  *	Variable-length cell type.

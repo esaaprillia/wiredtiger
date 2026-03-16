@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "swap.h"
+
 /*
  * WT_CRYPT_HEADER --
  *	Header for encryption key data.

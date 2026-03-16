@@ -2904,3 +2904,241 @@ __ut_txn_mod_compare(const void *a, const void *b)
     return (__txn_mod_compare(a, b));
 }
 #endif
+
+/*
+ * __wt_txn_err_set --
+ *     Set an error in the current transaction.
+ */
+void
+__wt_txn_err_set(WT_SESSION_IMPL *session, int ret)
+{
+    WT_TXN *txn;
+    txn = session->txn;
+    if (ret == WT_NOTFOUND || ret == WT_DUPLICATE_KEY || ret == WT_PREPARE_CONFLICT)
+        return;
+    if (!F_ISSET(txn, WT_TXN_RUNNING))
+        return;
+    F_SET(txn, WT_TXN_ERROR);
+}
+
+/*
+ * __wt_txn_context_prepare_check --
+ *     Complain if a transaction is in a prepared state.
+ */
+int
+__wt_txn_context_prepare_check(WT_SESSION_IMPL *session)
+{
+    if (F_ISSET(session->txn, WT_TXN_PREPARE_IGNORE_API_CHECK))
+        return (0);
+    if (F_ISSET(session->txn, WT_TXN_PREPARE))
+        WT_RET_MSG(session, EINVAL, "not permitted in a prepared transaction");
+    return (0);
+}
+
+/*
+ * __wt_txn_context_check --
+ *     Complain if a transaction is/isn't running.
+ */
+int
+__wt_txn_context_check(WT_SESSION_IMPL *session, bool requires_txn)
+{
+    if (requires_txn && !F_ISSET(session->txn, WT_TXN_RUNNING))
+        WT_RET_MSG(session, EINVAL, "only permitted in a running transaction");
+    if (!requires_txn && F_ISSET(session->txn, WT_TXN_RUNNING))
+        WT_RET_MSG(session, EINVAL, "not permitted in a running transaction");
+    return (0);
+}
+
+/*
+ * __wt_txn_oldest_id --
+ *     Return the oldest transaction ID that has to be kept for the current tree.
+ */
+uint64_t
+__wt_txn_oldest_id(WT_SESSION_IMPL *session)
+{
+    WT_CONNECTION_IMPL *conn;
+    WT_TXN_GLOBAL *txn_global;
+    uint64_t checkpoint_pinned, oldest_id, recovery_ckpt_snap_min;
+
+    conn = S2C(session);
+    txn_global = &conn->txn_global;
+
+    if (session->dhandle != NULL && WT_IS_METADATA(session->dhandle))
+        return (__wt_atomic_load_uint64_v_relaxed(&txn_global->metadata_pinned));
+
+    WT_ACQUIRE_READ_WITH_BARRIER(oldest_id, txn_global->oldest_id);
+
+    if (!F_ISSET(conn, WT_CONN_RECOVERING) || session->dhandle == NULL ||
+      F_ISSET(S2BT(session), WT_BTREE_LOGGED)) {
+        checkpoint_pinned =
+          __wt_atomic_load_uint64_v_relaxed(&txn_global->checkpoint_txn_shared.pinned_id);
+        if (checkpoint_pinned == WT_TXN_NONE || oldest_id < checkpoint_pinned)
+            return (oldest_id);
+        return (checkpoint_pinned);
+    } else {
+        recovery_ckpt_snap_min = conn->recovery_ckpt_snap_min;
+        if (recovery_ckpt_snap_min == WT_TXN_NONE || oldest_id < recovery_ckpt_snap_min)
+            return (oldest_id);
+        return (recovery_ckpt_snap_min);
+    }
+}
+
+/*
+ * __wt_txn_pinned_timestamp --
+ *     Get the first timestamp that has to be kept for the current tree.
+ */
+void
+__wt_txn_pinned_timestamp(WT_SESSION_IMPL *session, wt_timestamp_t *pinned_tsp)
+{
+    WT_TXN_GLOBAL *txn_global;
+    wt_timestamp_t checkpoint_ts, pinned_ts;
+    bool has_pinned_timestamp;
+
+    txn_global = &S2C(session)->txn_global;
+
+    has_pinned_timestamp = __wt_atomic_load_bool_acquire(&txn_global->has_pinned_timestamp);
+    if (!has_pinned_timestamp) {
+        *pinned_tsp = WT_TS_NONE;
+        return;
+    }
+
+    if (S2C(session)->version_cursor_count > 0) {
+        *pinned_tsp = txn_global->version_cursor_pinned_timestamp;
+        return;
+    }
+
+    pinned_ts = __wt_atomic_load_uint64_acquire(&txn_global->pinned_timestamp);
+    checkpoint_ts = txn_global->checkpoint_timestamp;
+
+    if (checkpoint_ts != WT_TS_NONE && checkpoint_ts < pinned_ts)
+        *pinned_tsp = checkpoint_ts;
+    else
+        *pinned_tsp = pinned_ts;
+}
+
+/*
+ * __wt_txn_visible_id_snapshot --
+ *     Is the id visible in terms of the given snapshot?
+ */
+bool
+__wt_txn_visible_id_snapshot(
+  uint64_t id, uint64_t snap_min, uint64_t snap_max, uint64_t *snapshot, uint32_t snapshot_count)
+{
+    bool found;
+    if (snap_max <= id)
+        return (false);
+    if (snapshot_count == 0 || id < snap_min)
+        return (true);
+    WT_BINARY_SEARCH(id, snapshot, snapshot_count, found);
+    return (!found);
+}
+
+static bool
+__txn_visible_all_id(WT_SESSION_IMPL *session, uint64_t id)
+{
+    WT_TXN *txn;
+    uint64_t oldest_id;
+
+    txn = session->txn;
+
+    WT_ASSERT(session,
+      (session->dhandle != NULL && WT_IS_METADATA(session->dhandle)) ||
+        WT_READING_CHECKPOINT(session) == F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT));
+
+    if (F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT))
+        return (
+          __wt_txn_visible_id_snapshot(id, txn->snapshot_data.snap_min, txn->snapshot_data.snap_max,
+            txn->snapshot_data.snapshot, txn->snapshot_data.snapshot_count));
+    oldest_id = __wt_txn_oldest_id(session);
+    return (id < oldest_id);
+}
+
+/*
+ * __wt_txn_timestamp_visible_all --
+ *     Check whether a given timestamp is either globally visible or obsolete.
+ */
+bool
+__wt_txn_timestamp_visible_all(WT_SESSION_IMPL *session, wt_timestamp_t timestamp)
+{
+    wt_timestamp_t pinned_ts;
+    __wt_txn_pinned_timestamp(session, &pinned_ts);
+    return (pinned_ts != WT_TS_NONE && timestamp <= pinned_ts);
+}
+
+/*
+ * __wt_txn_visible_all --
+ *     Check whether a given time window is either globally visible or obsolete.
+ */
+bool
+__wt_txn_visible_all(WT_SESSION_IMPL *session, uint64_t id, wt_timestamp_t timestamp)
+{
+    if (F_ISSET_ATOMIC_32(S2C(session), WT_CONN_CLOSING))
+        return (true);
+    if (!__txn_visible_all_id(session, id))
+        return (false);
+    if (timestamp == WT_TS_NONE)
+        return (true);
+
+    WT_ASSERT(session,
+      (session->dhandle != NULL && WT_IS_METADATA(session->dhandle)) ||
+        WT_READING_CHECKPOINT(session) == F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT));
+
+    if (F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT))
+        return (session->txn->checkpoint_oldest_timestamp != WT_TS_NONE &&
+          timestamp <= session->txn->checkpoint_oldest_timestamp);
+    return (__wt_txn_timestamp_visible_all(session, timestamp));
+}
+
+/*
+ * __wt_upd_alloc --
+ *     Allocate a WT_UPDATE structure and associated value and fill it in.
+ */
+int
+__wt_upd_alloc(WT_SESSION_IMPL *session, const WT_ITEM *value, u_int modify_type, WT_UPDATE **updp,
+  size_t *sizep)
+{
+    WT_UPDATE *upd;
+    size_t allocsz;
+
+    *updp = NULL;
+    WT_ASSERT(session, modify_type != WT_UPDATE_INVALID);
+    WT_ASSERT(session,
+      (value == NULL && (modify_type == WT_UPDATE_RESERVE || modify_type == WT_UPDATE_TOMBSTONE)) ||
+        (value != NULL &&
+          !(modify_type == WT_UPDATE_RESERVE || modify_type == WT_UPDATE_TOMBSTONE)));
+
+    if (value == NULL || value->size == 0)
+        allocsz = WT_UPDATE_SIZE_NOVALUE;
+    else
+        allocsz = WT_UPDATE_SIZE + value->size;
+
+    WT_RET(__wt_calloc(session, 1, allocsz, &upd));
+    if (value != NULL && value->size != 0) {
+        __wt_tsan_suppress_store_uint32(&upd->size, WT_STORE_SIZE(value->size));
+        memcpy(upd->data, value->data, value->size);
+    }
+    upd->type = (uint8_t)modify_type;
+
+    *updp = upd;
+    if (sizep != NULL)
+        *sizep = WT_UPDATE_MEMSIZE(upd);
+    return (0);
+}
+
+/*
+ * __wt_txn_activity_check --
+ *     Check whether there are any running transactions.
+ */
+int
+__wt_txn_activity_check(WT_SESSION_IMPL *session, bool *txn_active)
+{
+    WT_TXN_GLOBAL *txn_global;
+    txn_global = &S2C(session)->txn_global;
+    *txn_active = true;
+    WT_RET(__wt_txn_update_oldest(session, WT_TXN_OLDEST_STRICT | WT_TXN_OLDEST_WAIT));
+    *txn_active = (__wt_atomic_load_uint64_v_relaxed(&txn_global->oldest_id) !=
+        __wt_atomic_load_uint64_v_relaxed(&txn_global->current) ||
+      __wt_atomic_load_uint64_v_relaxed(&txn_global->metadata_pinned) !=
+        __wt_atomic_load_uint64_v_relaxed(&txn_global->current));
+    return (0);
+}

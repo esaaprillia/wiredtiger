@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "misc.h"
+#include "timestamp.h"
+
 /* Initialize the fields in a time window to their defaults. */
 #define WT_TIME_WINDOW_INIT(tw)                        \
     do {                                               \

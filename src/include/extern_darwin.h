@@ -1,5 +1,10 @@
 #pragma once
 
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "futex.h"
+
 /* DO NOT EDIT: automatically built by prototypes.py: BEGIN */
 
 extern int __wt_futex_wait(volatile WT_FUTEX_WORD *addr, WT_FUTEX_WORD expected, time_t usec,

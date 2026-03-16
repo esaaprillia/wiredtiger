@@ -8,6 +8,11 @@
 
 #pragma once
 
+#include "block.h"
+#include "misc.h"
+
+#include "intpack_inline.h"
+
 /*
  * WiredTiger's block manager interface.
  */

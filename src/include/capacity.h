@@ -8,13 +8,12 @@
 
 #pragma once
 
-typedef enum {
-    WT_THROTTLE_CHUNKCACHE, /* Chunk cache throttle */
-    WT_THROTTLE_CKPT,       /* Checkpoint throttle */
-    WT_THROTTLE_EVICT,      /* Eviction throttle */
-    WT_THROTTLE_LOG,        /* Logging throttle */
-    WT_THROTTLE_READ        /* Read throttle */
-} WT_THROTTLE_TYPE;
+#include "wt_system.h"
+#include "wt_fwd.h"
+#include "misc.h"
+#include "hardware.h"
+
+/* WT_THROTTLE_TYPE is defined in wt_fwd.h */
 
 #define WT_THROTTLE_MIN WT_MEGABYTE /* Config minimum size */
 

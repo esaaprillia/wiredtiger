@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "error.h"
+#include "swap.h"
+
 /*
  * Variable-length integer encoding.
  * We need up to 64 bits, signed and unsigned.  Further, we want the packed

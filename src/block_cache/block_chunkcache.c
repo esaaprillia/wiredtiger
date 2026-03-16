@@ -6,7 +6,37 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "hardware.h"
+#include "queue.h"
+#include "misc.h"
+#include "os.h"
+#include "error.h"
+#include "verbose.h"
+#include "stat.h"
+#include "config.h"
+#include "block.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "misc_inline.h"
+#include "buf_inline.h"
+#include "mutex_inline.h"
+#include "os_fhandle_inline.h"
+#ifdef _WIN32
+#include "extern_win.h"
+#else
+#include "extern_posix.h"
+#ifdef __linux__
+#include "extern_linux.h"
+#elif __APPLE__
+#include "extern_darwin.h"
+#endif
+#endif
 
 #ifdef HAVE_DIAGNOSTIC
 #define WT_BLOCK_OVERLAPS_CHUNK(chunk_off, block_off, chunk_size, block_size) \

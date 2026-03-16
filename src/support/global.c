@@ -380,3 +380,31 @@ __wt_library_init(void)
     }
     return (__wt_pthread_once_failed);
 }
+
+#define WT_TIMING_STRESS_MAX_DELAY (100000)
+
+/*
+ * __wt_timing_stress_sleep_random --
+ *     Sleep for a random time, with a bias towards shorter sleeps.
+ */
+void
+__wt_timing_stress_sleep_random(WT_SESSION_IMPL *session)
+{
+    double pct;
+    uint64_t i, max;
+
+    pct = 0.0;
+    if (__wt_evict_needed(session, false, false, false, &pct))
+        max = 5;
+    else
+        max = 9;
+
+    for (i = 0;;)
+        if (__wt_random(&session->rnd_random) & 0x1 || ++i > max)
+            break;
+
+    if (i == 0)
+        __wt_yield();
+    else
+        __wt_sleep(0, i * (WT_TIMING_STRESS_MAX_DELAY / 10));
+}

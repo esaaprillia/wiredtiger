@@ -8,6 +8,19 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "misc.h"
+#include "os.h"
+#include "error.h"
+#include "verbose.h"
+#include "session.h"
+#include "connection.h"
+
+#include "extern_noninline.h"
+
 /*
  * __wt_fs_file_system --
  *     Get the active file system handle.

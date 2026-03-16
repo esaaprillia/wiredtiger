@@ -6,7 +6,31 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "misc.h"
+#include "error.h"
+#include "verbose.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "misc_inline.h"
+#include "buf_inline.h"
+#include "os_fstream_inline.h"
+#include "time_inline.h"
+#ifdef _WIN32
+#include "extern_win.h"
+#else
+#include "extern_posix.h"
+#ifdef __linux__
+#include "extern_linux.h"
+#elif __APPLE__
+#include "extern_darwin.h"
+#endif
+#endif
 
 /* Define the string representation of each verbose category. */
 static const char *verbose_category_strings[] = WT_VERBOSE_CATEGORY_STR_INIT;
@@ -1016,4 +1040,27 @@ __wt_verbose_category_string(WT_VERBOSE_CATEGORY category)
     WT_ASSERT(NULL, category < WT_VERB_NUM_CATEGORIES);
 
     return (category < WT_VERB_NUM_CATEGORIES) ? verbose_category_strings[category] : "unknown";
+}
+
+/*
+ * __wt_build_assertion_string --
+ *     Format an assertion failure message into the provided buffer.
+ */
+void
+__wt_build_assertion_string(char *buf, size_t len, const char *expr, const char *fmt, ...)
+{
+    va_list ap;
+    int ret;
+    size_t offset;
+
+    offset = 0;
+    ret = snprintf(buf, len, "WiredTiger assertion failed: '%s'. ", expr);
+    if (ret > 0)
+        offset = (size_t)ret < len ? (size_t)ret : len;
+
+    if (offset < len) {
+        va_start(ap, fmt);
+        (void)vsnprintf(buf + offset, len - offset, fmt, ap);
+        va_end(ap);
+    }
 }

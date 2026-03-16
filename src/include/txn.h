@@ -8,6 +8,14 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "misc.h"
+#include "timestamp.h"
+#include "queue.h"
+#include "hardware.h"
+#include "../log/log.h"
+#include "error.h"
+
 #define WT_TXN_NONE 0                /* Beginning of time */
 #define WT_TXN_FIRST 1               /* First transaction to run */
 #define WT_TXN_MAX (UINT64_MAX - 10) /* End of time */
@@ -52,10 +60,7 @@ typedef enum {
     WT_VISIBLE_TRUE = 2     /* A visible update */
 } WT_VISIBLE_TYPE;
 
-/*
- * Enumeration used to track the context of reconstructing modifies within a update list.
- */
-typedef enum { WT_OPCTX_TRANSACTION, WT_OPCTX_RECONCILATION } WT_OP_CONTEXT;
+/* WT_OP_CONTEXT is defined in wt_fwd.h */
 
 /*
  * Transaction ID comparison dealing with edge cases.

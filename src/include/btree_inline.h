@@ -8,6 +8,22 @@
 
 #pragma once
 
+#include "btree.h"
+#include "cache.h"
+#include "connection.h"
+#include "dhandle.h"
+#include "session.h"
+
+#include "cache_inline.h"
+#include "cell_inline.h"
+#include "mutex_inline.h"
+#include "ref_inline.h"
+#include "txn_inline.h"
+
+#include "../evict/evict_inline.h"
+
+#include "extern.h"
+
 /*
  * __wt_btree_disable_bulk --
  *     Disable bulk loads into a tree.
@@ -112,21 +128,7 @@ __wt_page_evict_clean(WT_PAGE *page)
         page->modify->rec_result == 0));
 }
 
-/*
- * __wt_page_is_modified --
- *     Return if the page is dirty.
- */
-static WT_INLINE bool
-__wt_page_is_modified(WT_PAGE *page)
-{
-    /*
-     * Be cautious modifying this function: it's reading fields set by checkpoint reconciliation,
-     * and we're not blocking checkpoints (although we must block eviction as it might clear and
-     * free these structures).
-     */
-    return (page->modify != NULL &&
-      __wt_atomic_load_uint32_relaxed(&page->modify->page_state) != WT_PAGE_CLEAN);
-}
+/* __wt_page_is_modified moved to non-inline */
 
 /*
  * __wt_page_is_reconciling --
@@ -220,22 +222,7 @@ __wt_btree_dirty_inuse(WT_SESSION_IMPL *session)
     return (__wt_cache_bytes_plus_overhead(cache, dirty_inuse));
 }
 
-/*
- * __wt_btree_dirty_intl_inuse --
- *     Return the number of bytes in use by dirty internal pages.
- */
-static WT_INLINE uint64_t
-__wt_btree_dirty_intl_inuse(WT_SESSION_IMPL *session)
-{
-    WT_BTREE *btree;
-    WT_CACHE *cache;
-
-    btree = S2BT(session);
-    cache = S2C(session)->cache;
-
-    return (__wt_cache_bytes_plus_overhead(
-      cache, __wt_atomic_load_uint64_relaxed(&btree->bytes_dirty_intl)));
-}
+/* __wt_btree_dirty_intl_inuse moved to non-inline */
 
 /*
  * __wt_btree_dirty_leaf_inuse --
@@ -271,23 +258,7 @@ __wt_btree_bytes_updates(WT_SESSION_IMPL *session)
       cache, __wt_atomic_load_uint64_relaxed(&btree->bytes_updates)));
 }
 
-/*
- * __wt_btree_shared --
- *     Given a tree's URI and config, determine whether it's shared.
- */
-static WT_INLINE int
-__wt_btree_shared(WT_SESSION_IMPL *session, const char *uri, const char **bt_cfg, bool *shared)
-{
-    WT_CONFIG_ITEM cval;
-
-    WT_ASSERT(session, shared != NULL);
-    *shared = false;
-
-    WT_RET(__wt_config_gets(session, bt_cfg, "block_manager", &cval));
-    *shared = (WT_SUFFIX_MATCH(uri, ".wt_stable") || WT_CONFIG_LIT_MATCH("disagg", cval));
-
-    return (0);
-}
+/* __wt_btree_shared moved to non-inline */
 
 /*
  * __wt_btree_set_size --
@@ -299,15 +270,7 @@ __wt_btree_set_size(WT_SESSION_IMPL *session, uint64_t size)
     (void)__wt_atomic_store_uint64(&S2BT(session)->bytes_total, size);
 }
 
-/*
- * __wt_btree_increase_size --
- *     Increase the size of the tree.
- */
-static WT_INLINE void
-__wt_btree_increase_size(WT_SESSION_IMPL *session, uint64_t size)
-{
-    (void)__wt_atomic_add_uint64(&S2BT(session)->bytes_total, size);
-}
+/* __wt_btree_increase_size moved to non-inline */
 
 /*
  * __wt_btree_decrease_size --
@@ -320,44 +283,7 @@ __wt_btree_decrease_size(WT_SESSION_IMPL *session, uint64_t size)
     (void)__wt_atomic_sub_uint64(&S2BT(session)->bytes_total, size);
 }
 
-/*
- * __wt_btree_shared_base_name --
- *     Given a tree's URI, break it down into its base name, in a returned buffer, and the
- *     checkpoint id string.
- */
-static WT_INLINE int
-__wt_btree_shared_base_name(
-  WT_SESSION_IMPL *session, const char **namep, const char **checkpointp, WT_ITEM **name_bufp)
-{
-    WT_ITEM *name_buf;
-    size_t len;
-    const char *name, *suffix;
-
-    name = *namep;
-
-    /* If this isn't a stable URI, or there is no trailing checkpoint id, there's nothing to do. */
-    suffix = strstr(name, ".wt_stable/");
-    if (suffix == NULL)
-        return (0);
-
-    /* Move the suffix to point to the slash */
-    suffix += strlen(".wt_stable");
-
-    /* The returned name is the part before the suffix */
-    len = (size_t)(suffix - name);
-    WT_RET(__wt_scr_alloc(session, len + 1, name_bufp));
-    name_buf = *name_bufp;
-    WT_RET(__wt_buf_catfmt(session, name_buf, "%s", name));
-    ((char *)name_buf->data)[len] = '\0';
-
-    *namep = (const char *)name_buf->data;
-
-    /* The checkpoint id string, if needed, immediately follows the suffix. */
-    if (checkpointp != NULL)
-        *checkpointp = suffix + 1;
-
-    return (0);
-}
+/* __wt_btree_shared_base_name moved to non-inline */
 
 /*
  * __wt_cache_page_inmem_incr --
@@ -1014,71 +940,7 @@ __wt_page_only_modify_set(WT_SESSION_IMPL *session, WT_PAGE *page)
         __wt_atomic_store_uint64_relaxed(&page->modify->update_txn, session->txn->time_point.id);
 }
 
-/*
- * __wt_tree_modify_set --
- *     Mark the tree dirty.
- */
-static WT_INLINE void
-__wt_tree_modify_set(WT_SESSION_IMPL *session)
-{
-    WT_BTREE *btree;
-    WT_CONNECTION_IMPL *conn;
-
-    btree = S2BT(session);
-    conn = S2C(session);
-
-    if (F_ISSET(btree, WT_BTREE_READONLY))
-        return;
-
-    WT_ASSERT(
-      session, !F_ISSET(btree, WT_BTREE_DISAGGREGATED) || conn->layered_table_manager.leader);
-
-    /*
-     * Test before setting the dirty flag, it's a hot cache line.
-     *
-     * The tree's modified flag is cleared by the checkpoint thread: set it and insert a barrier
-     * before dirtying the page. (I don't think it's a problem if the tree is marked dirty with all
-     * the pages clean, it might result in an extra checkpoint that doesn't do any work but it
-     * shouldn't cause problems; regardless, let's play it safe.)
-     */
-    if (!btree->modified) {
-        /* Assert we never dirty a checkpoint handle. */
-        WT_ASSERT(session, !WT_READING_CHECKPOINT(session));
-
-        /*
-         * We should never set a btree dirty when checkpoint is triggered by RTS, recovery or when
-         * closing the connection. Those specific scenarios should always leave the database clean.
-         * The only exception is related to the metadata file: it is expected to be marked as dirty
-         * whenever a btree is checkpointed.
-         */
-        if (WT_SESSION_BTREE_SYNC(session) && !WT_IS_METADATA(session->dhandle) &&
-          !WT_IS_DISAGG_META(session->dhandle) &&
-          !FLD_ISSET(conn->timing_stress_flags, WT_TIMING_STRESS_CHECKPOINT_EVICT_PAGE)) {
-            WT_ASSERT_ALWAYS(session, !F_ISSET(session, WT_SESSION_ROLLBACK_TO_STABLE), "%s",
-              "A btree is marked dirty during RTS");
-            WT_ASSERT_ALWAYS(session,
-              !F_ISSET(conn, WT_CONN_RECOVERING) &&
-                !F_ISSET_ATOMIC_32(conn, WT_CONN_CLOSING_CHECKPOINT),
-              "%s", "A btree is marked dirty during recovery or shutdown");
-        }
-        btree->modified = true;
-        WT_FULL_BARRIER();
-
-        /*
-         * There is a potential race where checkpoint walks the tree and marks it as clean before a
-         * page is subsequently marked as dirty, leaving us with a dirty page on a clean tree. Yield
-         * here to encourage this scenario and ensure we're handling it correctly.
-         */
-        WT_DIAGNOSTIC_YIELD;
-    }
-
-    /*
-     * The btree may already be marked dirty while the connection is still clean; mark the
-     * connection dirty outside the test of the btree state.
-     */
-    if (!conn->modified)
-        conn->modified = true;
-}
+/* __wt_tree_modify_set moved to non-inline */
 
 /*
  * __wt_page_modify_clear --

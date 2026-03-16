@@ -8,6 +8,12 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "block.h"
+#include "cursor.h"
+#include "misc.h"
+#include "timestamp.h"
+
 #include "checkpoint_private.h"
 /*
  * WT_CKPT_SESSION --

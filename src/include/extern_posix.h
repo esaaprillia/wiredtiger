@@ -1,5 +1,14 @@
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "queue.h"
+#include "posix.h"
+#include "os.h"
+
 /* DO NOT EDIT: automatically built by prototypes.py: BEGIN */
 
 extern bool __wt_absolute_path(const char *path) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
@@ -64,6 +73,7 @@ extern void __wt_stream_set_line_buffer(FILE *fp)
   WT_GCC_FUNC_DECL_ATTRIBUTE((visibility("default")));
 extern void __wt_stream_set_no_buffer(FILE *fp) WT_GCC_FUNC_DECL_ATTRIBUTE((visibility("default")));
 extern void __wt_thread_id(uintmax_t *id) WT_GCC_FUNC_DECL_ATTRIBUTE((visibility("default")));
+extern void __wt_usec_to_timespec(time_t usec, struct timespec *tsp);
 extern void __wt_yield(void) WT_GCC_FUNC_DECL_ATTRIBUTE((visibility("default")));
 extern void __wti_posix_prepare_remap_resize_file(
   WT_FILE_HANDLE *file_handle, WT_SESSION *wt_session, wt_off_t len, bool *remap);

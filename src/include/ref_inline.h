@@ -8,6 +8,15 @@
 
 #pragma once
 
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "btmem.h"
+#include "hardware.h"
+#include "tsan_suppress.h"
+
+#include "extern_noninline.h"
+#include "time_inline.h"
+
 /*
  * __wt_ref_is_root --
  *     Return if the page reference is for the root page.

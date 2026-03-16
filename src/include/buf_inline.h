@@ -8,6 +8,17 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "error.h"
+#include "misc.h"
+#include "session.h"
+#include "connection.h"
+
+#include "extern_noninline.h"
+
 /*
  * __wt_buf_grow --
  *     Grow a buffer that may be in-use, and ensure that all data is local to the buffer.

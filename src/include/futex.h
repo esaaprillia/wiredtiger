@@ -1,4 +1,7 @@
 #pragma once
+
+#include "wt_system.h"
+
 /*-
  * Copyright (c) 2024-present MongoDB, Inc.
  *	All rights reserved.

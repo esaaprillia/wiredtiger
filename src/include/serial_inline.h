@@ -8,6 +8,15 @@
 
 #pragma once
 
+#include "btmem.h"
+#include "connection.h"
+#include "session.h"
+
+#include "btree_inline.h"
+#include "txn_inline.h"
+
+#include "extern.h"
+
 /*
  * __insert_simple_func --
  *     Worker function to add a WT_INSERT entry to the middle of a skiplist.

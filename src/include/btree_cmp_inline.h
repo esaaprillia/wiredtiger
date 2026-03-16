@@ -8,6 +8,12 @@
 
 #pragma once
 
+#include "btree.h"
+#include "cursor.h"
+#include "session.h"
+
+#include "intpack_inline.h"
+
 #if defined(HAVE_X86INTRIN_H)
 #if !defined(_MSC_VER) && !defined(_lint)
 #include <x86intrin.h>

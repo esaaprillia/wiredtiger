@@ -6,7 +6,17 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "os.h"
+#include "error.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "extern_posix.h"
 
 /*
  * __wt_epoch_raw --
@@ -46,6 +56,17 @@ __wt_epoch_raw(WT_SESSION_IMPL *session, struct timespec *tsp)
 #else
 #error "No clock_gettime or gettimeofday available"
 #endif
+}
+
+/*
+ * __wt_usec_to_timespec --
+ *     Initialize a timespec to represent the specified number of microseconds.
+ */
+void
+__wt_usec_to_timespec(time_t usec, struct timespec *tsp)
+{
+    tsp->tv_sec = usec / WT_MILLION;
+    tsp->tv_nsec = (usec % WT_MILLION) * WT_THOUSAND;
 }
 
 /*

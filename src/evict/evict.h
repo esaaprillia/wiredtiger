@@ -8,6 +8,13 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "btmem.h"
+#include "cache.h"
+#include "misc.h"
+#include "mutex.h"
+#include "queue.h"
+
 #include "evict_private.h"
 
 struct __wt_evict {
@@ -189,34 +196,6 @@ extern void __wt_evict_priority_set(WT_SESSION_IMPL *session, uint64_t v);
 extern void __wt_evict_server_wake(WT_SESSION_IMPL *session);
 extern void __wt_evict_stats_init(WT_SESSION_IMPL *session);
 extern void __wt_evict_stats_update(WT_SESSION_IMPL *session);
-static WT_INLINE bool __wt_evict_aggressive(WT_SESSION_IMPL *session)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE bool __wt_evict_cache_stuck(WT_SESSION_IMPL *session)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE bool __wt_evict_clean_needed(WT_SESSION_IMPL *session, double *pct_fullp)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE bool __wt_evict_clean_pressure(WT_SESSION_IMPL *session)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE bool __wt_evict_dirty_needed(WT_SESSION_IMPL *session, double *pct_fullp)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE bool __wt_evict_needed(WT_SESSION_IMPL *session, bool busy, bool readonly,
-  bool ignore_updates_dirty, double *pct_fullp) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE bool __wt_evict_page_is_soon(WT_PAGE *page)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE bool __wt_evict_page_is_soon_or_wont_need(WT_PAGE *page)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE int __wt_evict_app_assist_worker_check(
-  WT_SESSION_IMPL *session, bool busy, bool readonly, bool interruptible, bool *didworkp)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE void __wt_evict_clear_npos(WT_BTREE *btree);
-static WT_INLINE void __wt_evict_favor_clearing_dirty_cache(WT_SESSION_IMPL *session);
-static WT_INLINE void __wt_evict_inherit_page_state(WT_PAGE *orig_page, WT_PAGE *new_page);
-static WT_INLINE void __wt_evict_page_cache_bytes_decr(WT_SESSION_IMPL *session, WT_PAGE *page);
-static WT_INLINE void __wt_evict_page_first_dirty(WT_SESSION_IMPL *session, WT_PAGE *page);
-static WT_INLINE void __wt_evict_page_init(WT_PAGE *page);
-static WT_INLINE void __wt_evict_page_soon(WT_SESSION_IMPL *session, WT_REF *ref);
-static WT_INLINE void __wt_evict_touch_page(
-  WT_SESSION_IMPL *session, WT_PAGE *page, bool internal_only, bool wont_need);
 
 #ifdef HAVE_UNITTEST
 

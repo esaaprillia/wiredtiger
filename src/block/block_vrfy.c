@@ -6,7 +6,31 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "misc.h"
+#include "os.h"
+#include "error.h"
+#include "verbose.h"
+#include "block.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "buf_inline.h"
+#include "bitstring_inline.h"
+#ifdef _WIN32
+#include "extern_win.h"
+#else
+#include "extern_posix.h"
+#ifdef __linux__
+#include "extern_linux.h"
+#elif __APPLE__
+#include "extern_darwin.h"
+#endif
+#endif
 
 static int __verify_ckptfrag_add(WT_SESSION_IMPL *, WT_BLOCK *, wt_off_t, wt_off_t);
 static int __verify_ckptfrag_chk(WT_SESSION_IMPL *, WT_BLOCK *);

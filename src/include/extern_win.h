@@ -1,5 +1,14 @@
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "queue.h"
+#include "os_windows.h"
+#include "os.h"
+
 /* DO NOT EDIT: automatically built by prototypes.py: BEGIN */
 
 extern DWORD __wt_getlasterror(void) WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));

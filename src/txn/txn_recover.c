@@ -6,7 +6,42 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "hardware.h"
+#include "misc.h"
+#include "os.h"
+#include "version.h"
+#include "meta.h"
+#include "error.h"
+#include "verbose.h"
+#include "timestamp.h"
+#include "stat.h"
+#include "schema.h"
+#include "txn.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "intpack_inline.h"
+#include "misc_inline.h"
+#include "buf_inline.h"
+#include "mutex_inline.h"
+#include "modify_inline.h"
+#include "os_fs_inline.h"
+#include "time_inline.h"
+#ifdef _WIN32
+#include "extern_win.h"
+#else
+#include "extern_posix.h"
+#ifdef __linux__
+#include "extern_linux.h"
+#elif __APPLE__
+#include "extern_darwin.h"
+#endif
+#endif
 
 /* Enable all recovery-related verbose messaging events. */
 #define WT_VERB_RECOVERY_ALL        \

@@ -8,6 +8,17 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "session.h"
+#include "connection.h"
+
+#include "extern_noninline.h"
+#include "os_fhandle_inline.h"
+#include "os_fs_inline.h"
+
 /*
  * __wt_getline --
  *     Get a line from a stream.

@@ -8,6 +8,43 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_fwd.h"
+#include "session.h"
+#include "dhandle.h"
+#include "mutex.h"
+#include "queue.h"
+#include "block.h"
+#include "misc.h"
+#include "hardware.h"
+#include "stat.h"
+#include "meta.h"
+#include "thread_group.h"
+#include "../log/log.h"
+#include "../checkpoint/checkpoint.h"
+#include "../evict/evict.h"
+#include "rollback_to_stable.h"
+#include "tiered.h"
+#include "capacity.h"
+#include "config.h"
+#include "conf_keys.h"
+#include "conf.h"
+#include "verbose.h"
+#include "error.h"
+#include "compact.h"
+#include "cache.h"
+#include "txn.h"
+#include "version.h"
+#include "optrack.h"
+#include "os.h"
+#include "block_cache.h"
+#include "block_chunkcache.h"
+#include "schema.h"
+#include "cursor.h"
+#include "btree.h"
+#include "btmem.h"
+
 /*******************************************
  * Global per-process structure.
  *******************************************/
@@ -160,14 +197,7 @@ struct __wt_layered_table_manager {
 #define WT_DISAGG_CHECKPOINT_META_VERSION 1
 #define WT_DISAGG_CHECKPOINT_META_COMPATIBLE_VERSION 1
 
-/*
- * Identify the shared metadata operations inside the shared metadata queue.
- */
-typedef enum {
-    WT_SHARED_METADATA_UPDATE,
-    WT_SHARED_METADATA_CREATE,
-    WT_SHARED_METADATA_REMOVE
-} WT_SHARED_METADATA_OP;
+/* WT_SHARED_METADATA_OP is defined in wt_fwd.h */
 
 /*
  * WT_DISAGG_METADATA_OP --

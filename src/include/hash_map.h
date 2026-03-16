@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "wt_system.h"
+#include "wt_fwd.h"
+#include "queue.h"
+
 /*
  * WT_HASH_MAP_ITEM --
  *     An item in the hash map.

@@ -8,6 +8,13 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_fwd.h"
+#include "conf_keys.h"
+#include "misc.h"
+#include "bitstring.h"
+
 /*
  * Sample usage:
  *  __wt_conf_gets(session, conf, statistics, &cval);

@@ -94,6 +94,7 @@ else()
     endif()
 endif()
 list(APPEND swig_c_flags -I${CMAKE_SOURCE_DIR})
+list(APPEND swig_c_flags -I${CMAKE_SOURCE_DIR}/src/include)
 list(APPEND swig_c_flags -I${CMAKE_BINARY_DIR}/config)
 
 # SWIG will generate deprecated python3 protocols (being marked as deprecated in Python 3.7+). Generally supress these warnings

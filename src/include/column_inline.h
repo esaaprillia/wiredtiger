@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "btmem.h"
+
 /*
  * __col_insert_search_gt --
  *     Search a column-store insert list for the next larger record.

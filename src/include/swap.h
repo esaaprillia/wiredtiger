@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "wt_system.h"
 #include "misc.h"
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1300)

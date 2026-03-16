@@ -8,6 +8,13 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "timestamp.h"
+#include "misc.h"
+#include "mutex.h"
+#include "queue.h"
+#include "hardware.h"
+
 #define WT_RECNO_OOB 0 /* Illegal record number */
 
 /* AUTOMATIC FLAG VALUE GENERATION START 0 */

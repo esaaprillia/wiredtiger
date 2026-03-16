@@ -213,22 +213,48 @@ def build_module_functions_dicts():
 
 # Given a list of dicts that map a module to their public, private, and HAVE_UNITTEST functions, 
 # write their header files with function declarations.
+def _is_inline_decl(decl):
+    prefix = decl.split('(')[0]
+    return 'inline' in prefix or 'WT_INLINE' in prefix
+
 def write_header_files(public_fns_dict, private_fns_dict, tests_dict):
     # Trust that the public functions dict lists all modules. 
     # If a module doesn't have a public function then it can't be accessed and is dead code.
+    # Modules whose inline headers are included by wt_internal.h.
+    # Inline declarations from these modules must be in extern.h so they are
+    # visible before the inline definitions.
+    MODULES_WITH_INLINE_IN_WT_INTERNAL = {"evict", "log"}
+
     modules = public_fns_dict.keys()
+
+    # Collect inline declarations ONLY from modules whose inline headers are in wt_internal.h
+    wt_internal_inline_fns = []
+    for mod in modules:
+        if mod != "include" and mod in MODULES_WITH_INLINE_IN_WT_INTERNAL:
+            wt_internal_inline_fns.extend(
+                [f for f in public_fns_dict[mod] if _is_inline_decl(f)])
+            wt_internal_inline_fns.extend(
+                [f for f in private_fns_dict[mod] if _is_inline_decl(f)])
+
     for mod in modules:
         if mod == "include":
-            # Functions defined in the include folder belong in extern.h
-            output(public_fns_dict[mod] + private_fns_dict[mod], tests_dict[mod], 
-                f"../src/include/extern.h")
+            all_fns = public_fns_dict[mod] + private_fns_dict[mod]
+            all_tests = tests_dict[mod]
+            # extern.h: all declarations from include module + inline from wt_internal modules
+            extern_fns = all_fns + wt_internal_inline_fns
+            output(extern_fns, all_tests, f"../src/include/extern.h")
+            # extern_noninline.h: only non-inline declarations (used by migrated .c files)
+            non_inline_fns = [f for f in all_fns if not _is_inline_decl(f)]
+            non_inline_tests = [f for f in all_tests if not _is_inline_decl(f)]
+            output(non_inline_fns, non_inline_tests, f"../src/include/extern_noninline.h")
         else:
-            output(public_fns_dict[mod], tests_dict[mod], f"../src/{mod}/{mod}.h")
+            # Module headers: only non-inline declarations (safe to include without inline defs)
+            non_inline_pub = [f for f in public_fns_dict[mod] if not _is_inline_decl(f)]
+            non_inline_tests = [f for f in tests_dict[mod] if not _is_inline_decl(f)]
+            output(non_inline_pub, non_inline_tests, f"../src/{mod}/{mod}.h")
             if len(private_fns_dict[mod]) > 0:
-                # The second argument (tests_dict) is empty. These test functions are defined to
-                # expose module internals outside the module, so it doens't make sense for them 
-                # to be private.
-                output(private_fns_dict[mod], {}, f"../src/{mod}/{mod}_private.h")
+                non_inline_priv = [f for f in private_fns_dict[mod] if not _is_inline_decl(f)]
+                output(non_inline_priv, {}, f"../src/{mod}/{mod}_private.h")
 
 def prototypes_os():
     """

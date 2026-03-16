@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "misc.h"
+
 #define WT_MODIFY_FOREACH_BEGIN(mod, p, nentries, napplied)                                       \
     do {                                                                                          \
         const uint8_t *__p = p;                                                                   \

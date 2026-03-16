@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "wt_system.h"
+
 #define WT_WIREDTIGER "WiredTiger"        /* Version file */
 #define WT_SINGLETHREAD "WiredTiger.lock" /* Locking file */
 

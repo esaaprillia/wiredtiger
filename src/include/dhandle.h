@@ -8,6 +8,13 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "mutex.h"
+#include "queue.h"
+#include "stat.h"
+#include "misc.h"
+#include "error.h"
+
 /*
  * Helpers for calling a function with a data handle in session->dhandle then restoring afterwards.
  */

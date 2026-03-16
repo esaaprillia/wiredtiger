@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "wt_system.h"
+
 #include <sys/statvfs.h>
 
 /* Some systems don't configure 64-bit MIN/MAX by default. */

@@ -8,6 +8,13 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "hardware.h"
+#include "queue.h"
+
 #define WT_SYSCALL(call, ret)                                          \
     do {                                                               \
         /*                                                             \

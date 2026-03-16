@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "misc.h"
+
 #define WT_LIVE_RESTORE_STATE_STRING_MAX 128
 
 /*

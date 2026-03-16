@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "connection.h"
+#include "session.h"
+
 /* FIXME: Move all generation functions into one file. */
 
 /*

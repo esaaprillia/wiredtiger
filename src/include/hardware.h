@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "wt_system.h"
+#include "wt_compiler.h"
+
 /*
  * This macro doesn't do anything and is used for annotation only. We use it to highlight
  * the variable is used in lock-less inter-thread communication - using mechanisms like memory

@@ -28,6 +28,13 @@
 
 #pragma once
 
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "bitstring.h"
+#include "session.h"
+
+#include "extern_noninline.h"
+
 /*-
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.

@@ -8,6 +8,13 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_fwd.h"
+#include "wt_system.h"
+#include "misc.h"
+#include "error.h"
+
 struct __wt_config {
     WT_SESSION_IMPL *session;
     const char *orig;

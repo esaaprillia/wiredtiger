@@ -8,6 +8,16 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "misc.h"
+#include "mutex.h"
+#include "queue.h"
+#ifdef _WIN32
+#include "os_windows.h"
+#else
+#include "posix.h"
+#endif
+
 /* WiredTiger's chunk cache. Locally caches chunks of remote objects. */
 
 #define WT_CC_KEY_FORMAT WT_UNCHECKED_STRING(SLq)

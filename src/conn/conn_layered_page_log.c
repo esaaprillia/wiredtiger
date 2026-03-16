@@ -6,7 +6,33 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "hardware.h"
+#include "swap.h"
+#include "crypt_header.h"
+#include "error.h"
+#include "timestamp.h"
+#include "config.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "buf_inline.h"
+#include "mutex_inline.h"
+#include "conf_inline.h"
+#ifdef _WIN32
+#include "extern_win.h"
+#else
+#include "extern_posix.h"
+#ifdef __linux__
+#include "extern_linux.h"
+#elif __APPLE__
+#include "extern_darwin.h"
+#endif
+#endif
 
 /* Function prototypes for disaggregated storage and layered tables. */
 static void __disagg_set_crypt_header(WT_SESSION_IMPL *session, WT_CRYPT_KEYS *crypt);

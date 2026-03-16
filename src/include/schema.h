@@ -8,6 +8,11 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "queue.h"
+#include "misc.h"
+#include "dhandle.h"
+
 /* Character constants for projection plans */
 #define WT_PROJ_KEY 'k'   /* Go to key in cursor <arg> */
 #define WT_PROJ_NEXT 'n'  /* Process the next item (<arg> repeats) */

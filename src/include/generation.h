@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "wt_system.h"
+#include "wt_fwd.h"
+
 /*
  * WT_GENERATION_COOKIE --
  *   State passed through to callbacks during the session walk logic when

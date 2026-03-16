@@ -8,6 +8,20 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "mutex.h"
+#include "os.h"
+#include "stat.h"
+#include "session.h"
+#include "connection.h"
+
+#include "extern_noninline.h"
+#include "misc_inline.h"
+#include "time_inline.h"
+
 /*
  * Spin locks:
  *

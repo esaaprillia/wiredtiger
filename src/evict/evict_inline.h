@@ -8,6 +8,17 @@
 
 #pragma once
 
+#include "btmem.h"
+#include "cache.h"
+#include "connection.h"
+#include "dhandle.h"
+#include "evict.h"
+#include "session.h"
+
+#include "cache_inline.h"
+
+#include "extern.h"
+
 /* !!!
  * __wt_evict_aggressive --
  *     Check whether eviction is unable to make any progress for some amount of time.

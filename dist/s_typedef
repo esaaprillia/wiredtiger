@@ -17,13 +17,13 @@ build() {
 
     [[ -z "$(
         {
-            echo ../src/include/wt_internal.h
+            echo ../src/include/wt_fwd.h
             ls -1 ../src/*/*.h ../src/include/*.in
         } | filter_if_fast ../
     )" ]] && return
 
     # Build the standard typedefs.
-    f=../src/include/wt_internal.h
+    f=../src/include/wt_fwd.h
     (sed -e '/Forward type declarations .*: BEGIN/{' \
         -e 'n' \
         -e 'q' \
@@ -54,7 +54,6 @@ build() {
         -e 'p' \
         -e '}' \
         -e 'd' < $f) > $t || exit $?
-    ./s_clang_format "${PWD}/$t" || exit $?
     cmp $t $f > /dev/null 2>&1 ||
         { echo "Building $f" ; cp -f $t $f; }
 }

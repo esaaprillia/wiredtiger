@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "wt_system.h"
+
 /*
  * Define WT threading and concurrency primitives Assumes Windows 7+/2008 R2+
  */

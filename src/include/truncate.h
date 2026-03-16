@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+
 /*
  * WT_TRUNCATE_INFO
  *	A set of context associated with a range truncate operation.

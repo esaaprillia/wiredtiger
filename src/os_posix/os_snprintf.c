@@ -6,7 +6,14 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "error.h"
+#include "extern_noninline.h"
+#include "extern_posix.h"
 
 /*
  * __wt_vsnprintf_len_incr --

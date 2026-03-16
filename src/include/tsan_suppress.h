@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "misc.h"
+
 /*
  * This file was created for functions intended for fine-grained suppression of TSAN warnings. Since
  * TSAN only supports suppression at the function level, but a single function may trigger multiple

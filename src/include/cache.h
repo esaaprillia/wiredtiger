@@ -8,13 +8,18 @@
 
 #pragma once
 
-/* Cache operations. */
-typedef enum __wt_cache_op {
-    WT_SYNC_CHECKPOINT,
-    WT_SYNC_CLOSE,
-    WT_SYNC_DISCARD,
-    WT_SYNC_WRITE_LEAVES
-} WT_CACHE_OP;
+#include "wt_fwd.h"
+#include "mutex.h"
+#include "queue.h"
+#include "misc.h"
+#include "hardware.h"
+#ifdef _WIN32
+#include "os_windows.h"
+#else
+#include "posix.h"
+#endif
+
+/* WT_CACHE_OP is defined in wt_fwd.h */
 
 #define WT_HS_FILE_MIN (100 * WT_MEGABYTE)
 

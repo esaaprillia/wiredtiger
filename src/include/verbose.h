@@ -7,6 +7,12 @@
  */
 
 #pragma once
+
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_fwd.h"
+#include "misc.h"
+
 /*
  * Structure to bundle verbose message identification details.
  */

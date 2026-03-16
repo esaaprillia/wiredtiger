@@ -1,0 +1,435 @@
+#!/usr/bin/env python3
+"""
+Measure header inclusion waste in the WiredTiger codebase.
+
+For each .c file, determines which headers it actually needs (by symbol usage)
+versus how many it gets (via wt_internal.h or direct includes), and reports
+the waste ratio.
+
+Usage:
+    python3 dist/s_header_waste                           # human-readable report
+    python3 dist/s_header_waste --json                    # JSON output
+    python3 dist/s_header_waste --json > baseline.json    # save baseline
+    python3 dist/s_header_waste --baseline baseline.json  # compare to baseline
+"""
+
+import argparse
+import collections
+import json
+import os
+import re
+import sys
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TOP_DIR = os.path.dirname(SCRIPT_DIR)
+SRC_DIR = os.path.join(TOP_DIR, "src")
+INCLUDE_DIR = os.path.join(SRC_DIR, "include")
+WTI_PATH = os.path.join(INCLUDE_DIR, "wt_internal.h")
+
+# Patterns for symbols we track.
+RE_DEFINE = re.compile(r"^\s*#\s*define\s+(WT_[A-Z][A-Z0-9_]+|WTI_[A-Z][A-Z0-9_]+)\b")
+RE_STRUCT_DEF = re.compile(
+    r"^(?:struct|union)\s+(__wt[i]?_\w+)\s*\{|"
+    r"^WT_PACKED_STRUCT_BEGIN\((__wt[i]?_\w+)\)"
+)
+RE_TYPEDEF = re.compile(
+    r"^\s*typedef\s+(?:struct|union)\s+__wt[i]?_\w+\s+(WT_[A-Z][A-Z0-9_]+|WTI_[A-Z][A-Z0-9_]+)\s*;"
+)
+
+RE_WT_SYMBOL = re.compile(r"\bWT_[A-Z][A-Z0-9_]+\b|\bWTI_[A-Z][A-Z0-9_]+\b")
+RE_WT_FUNC = re.compile(r"\b__wt[i]?_[a-z_][a-z0-9_]*\b")
+
+RE_INCLUDE_QUOTED = re.compile(r'^\s*#\s*include\s+"([^"]+)"')
+
+
+def resolve_header_path(name):
+    """Resolve a header name from wt_internal.h to an absolute path."""
+    if name.startswith("../"):
+        return os.path.normpath(os.path.join(INCLUDE_DIR, name))
+    candidate = os.path.join(INCLUDE_DIR, name)
+    if os.path.isfile(candidate):
+        return candidate
+    return None
+
+
+def parse_wt_internal():
+    """Parse wt_internal.h to get the list of headers it includes (in order)."""
+    headers = []
+    with open(WTI_PATH) as f:
+        for line in f:
+            m = RE_INCLUDE_QUOTED.match(line)
+            if m:
+                name = m.group(1)
+                path = resolve_header_path(name)
+                if path and os.path.isfile(path):
+                    headers.append(path)
+    return headers
+
+
+def build_symbol_to_header_map(header_paths):
+    """
+    Build a mapping from symbol -> set of header paths that define it.
+    Tracks #define macros, struct/union definitions, and typedefs.
+    """
+    sym_map = collections.defaultdict(set)
+
+    for hpath in header_paths:
+        hkey = os.path.relpath(hpath, TOP_DIR)
+        try:
+            with open(hpath) as f:
+                content = f.read()
+        except OSError:
+            continue
+
+        for line in content.splitlines():
+            m = RE_DEFINE.match(line)
+            if m:
+                sym_map[m.group(1)].add(hkey)
+                continue
+
+            m = RE_STRUCT_DEF.match(line)
+            if m:
+                struct_name = m.group(1) or m.group(2)
+                sym_map[struct_name].add(hkey)
+                continue
+
+            m = RE_TYPEDEF.match(line)
+            if m:
+                sym_map[m.group(1)].add(hkey)
+
+    return dict(sym_map)
+
+
+def find_c_files():
+    """Find all .c files under src/ (excluding test utilities and third-party)."""
+    c_files = []
+    for dirpath, _dirnames, filenames in os.walk(SRC_DIR):
+        for fn in sorted(filenames):
+            if fn.endswith(".c"):
+                c_files.append(os.path.join(dirpath, fn))
+    return sorted(c_files)
+
+
+def get_header_line_counts(header_paths):
+    """Get line counts for each header."""
+    counts = {}
+    for hpath in header_paths:
+        hkey = os.path.relpath(hpath, TOP_DIR)
+        try:
+            with open(hpath) as f:
+                counts[hkey] = sum(1 for _ in f)
+        except OSError:
+            counts[hkey] = 0
+    return counts
+
+
+def analyze_file(filepath, sym_map, wti_headers_set, wti_header_keys):
+    """
+    Analyze a single .c file.
+    Returns dict with: needed_headers, exposed_headers, symbols_used, includes_wt_internal.
+    """
+    try:
+        with open(filepath) as f:
+            content = f.read()
+    except OSError:
+        return None
+
+    wt_symbols = set(RE_WT_SYMBOL.findall(content))
+    wt_funcs = set(RE_WT_FUNC.findall(content))
+    all_symbols = wt_symbols | wt_funcs
+
+    needed_headers = set()
+    for sym in all_symbols:
+        if sym in sym_map:
+            needed_headers.update(sym_map[sym])
+
+    includes_wti = False
+    direct_includes = []
+    for line in content.splitlines():
+        m = RE_INCLUDE_QUOTED.match(line)
+        if m:
+            inc = m.group(1)
+            if "wt_internal.h" in inc:
+                includes_wti = True
+            else:
+                direct_includes.append(inc)
+
+    if includes_wti:
+        exposed_headers = set(wti_header_keys)
+    else:
+        exposed_headers = set()
+        for inc in direct_includes:
+            path = resolve_header_path(inc)
+            if path:
+                exposed_headers.add(os.path.relpath(path, TOP_DIR))
+
+    return {
+        "needed_headers": sorted(needed_headers),
+        "exposed_headers": sorted(exposed_headers),
+        "num_needed": len(needed_headers),
+        "num_exposed": len(exposed_headers),
+        "num_symbols": len(all_symbols),
+        "includes_wt_internal": includes_wti,
+    }
+
+
+def percentile(sorted_vals, p):
+    if not sorted_vals:
+        return 0
+    idx = int(len(sorted_vals) * p / 100)
+    idx = min(idx, len(sorted_vals) - 1)
+    return sorted_vals[idx]
+
+
+def compute_report(file_results, header_line_counts, wti_header_keys):
+    """Compute aggregate metrics from per-file results."""
+    needed_counts = sorted(r["num_needed"] for r in file_results.values())
+    exposed_counts = sorted(r["num_exposed"] for r in file_results.values())
+
+    total_needed_lines = 0
+    total_exposed_lines = 0
+    for r in file_results.values():
+        for h in r["needed_headers"]:
+            total_needed_lines += header_line_counts.get(h, 0)
+        for h in r["exposed_headers"]:
+            total_exposed_lines += header_line_counts.get(h, 0)
+
+    total_exposed = sum(r["num_exposed"] for r in file_results.values())
+    total_needed = sum(r["num_needed"] for r in file_results.values())
+    n = len(file_results)
+
+    header_needed_by = collections.Counter()
+    header_exposed_to = collections.Counter()
+    for r in file_results.values():
+        for h in r["needed_headers"]:
+            header_needed_by[h] += 1
+        for h in r["exposed_headers"]:
+            header_exposed_to[h] += 1
+
+    most_wasted = []
+    for h in wti_header_keys:
+        exposed = header_exposed_to.get(h, 0)
+        needed = header_needed_by.get(h, 0)
+        if exposed > 0:
+            waste = exposed - needed
+            most_wasted.append({
+                "header": h,
+                "exposed_to": exposed,
+                "needed_by": needed,
+                "waste_count": waste,
+                "waste_pct": round(100.0 * waste / exposed, 1) if exposed else 0,
+            })
+    most_wasted.sort(key=lambda x: x["waste_count"], reverse=True)
+
+    module_stats = collections.defaultdict(lambda: {"files": 0, "total_needed": 0, "total_exposed": 0})
+    for fpath, r in file_results.items():
+        parts = fpath.split(os.sep)
+        if len(parts) >= 2:
+            module = parts[0] + "/" + parts[1]
+        else:
+            module = parts[0]
+        module_stats[module]["files"] += 1
+        module_stats[module]["total_needed"] += r["num_needed"]
+        module_stats[module]["total_exposed"] += r["num_exposed"]
+
+    for m in module_stats.values():
+        if m["files"] > 0:
+            m["avg_needed"] = round(m["total_needed"] / m["files"], 1)
+            m["avg_exposed"] = round(m["total_exposed"] / m["files"], 1)
+            m["waste_pct"] = round(100.0 * (1 - m["total_needed"] / m["total_exposed"]), 1) if m["total_exposed"] else 0
+
+    waste_ratio = round(100.0 * (1 - total_needed / total_exposed), 1) if total_exposed else 0
+
+    return {
+        "summary": {
+            "total_files": n,
+            "total_headers_in_wti": len(wti_header_keys),
+            "overall_waste_ratio_pct": waste_ratio,
+            "total_inclusion_pairs": total_exposed,
+            "total_needed_pairs": total_needed,
+            "total_wasted_pairs": total_exposed - total_needed,
+            "total_exposed_lines": total_exposed_lines,
+            "total_needed_lines": total_needed_lines,
+            "total_wasted_lines": total_exposed_lines - total_needed_lines,
+        },
+        "distribution_needed": {
+            "min": needed_counts[0] if needed_counts else 0,
+            "p25": percentile(needed_counts, 25),
+            "median": percentile(needed_counts, 50),
+            "p75": percentile(needed_counts, 75),
+            "p90": percentile(needed_counts, 90),
+            "max": needed_counts[-1] if needed_counts else 0,
+            "avg": round(sum(needed_counts) / len(needed_counts), 1) if needed_counts else 0,
+        },
+        "top_wasted_headers": most_wasted[:15],
+        "module_stats": {k: v for k, v in sorted(module_stats.items())},
+        "per_file": {k: v for k, v in sorted(file_results.items())},
+    }
+
+
+def print_report(report):
+    """Print human-readable report to stdout."""
+    s = report["summary"]
+    d = report["distribution_needed"]
+
+    print("=" * 72)
+    print("  WiredTiger Header Inclusion Waste Report")
+    print("=" * 72)
+    print()
+    print(f"  Files analyzed:          {s['total_files']}")
+    print(f"  Headers in wt_internal:  {s['total_headers_in_wti']}")
+    print(f"  Overall waste ratio:     {s['overall_waste_ratio_pct']}%")
+    print()
+    print(f"  Total (file x header) inclusion pairs:")
+    print(f"    Exposed:  {s['total_inclusion_pairs']:>8}")
+    print(f"    Needed:   {s['total_needed_pairs']:>8}")
+    print(f"    Wasted:   {s['total_wasted_pairs']:>8}")
+    print()
+    print(f"  Total header lines across all files:")
+    print(f"    Exposed:  {s['total_exposed_lines']:>10}")
+    print(f"    Needed:   {s['total_needed_lines']:>10}")
+    print(f"    Wasted:   {s['total_wasted_lines']:>10}")
+    print()
+
+    print("-" * 72)
+    print("  Distribution: headers needed per .c file")
+    print("-" * 72)
+    print(f"    Min:     {d['min']}")
+    print(f"    P25:     {d['p25']}")
+    print(f"    Median:  {d['median']}")
+    print(f"    P75:     {d['p75']}")
+    print(f"    P90:     {d['p90']}")
+    print(f"    Max:     {d['max']}")
+    print(f"    Avg:     {d['avg']}")
+    print()
+
+    print("-" * 72)
+    print("  Top 15 most over-included headers")
+    print("-" * 72)
+    print(f"  {'Header':<40} {'Exposed':>8} {'Needed':>8} {'Waste':>8} {'Waste%':>7}")
+    for h in report["top_wasted_headers"]:
+        name = os.path.basename(h["header"])
+        print(f"  {name:<40} {h['exposed_to']:>8} {h['needed_by']:>8} {h['waste_count']:>8} {h['waste_pct']:>6.1f}%")
+    print()
+
+    print("-" * 72)
+    print("  Per-module breakdown")
+    print("-" * 72)
+    print(f"  {'Module':<30} {'Files':>6} {'AvgNeed':>8} {'AvgExp':>8} {'Waste%':>7}")
+    for mod, ms in sorted(report["module_stats"].items()):
+        print(f"  {mod:<30} {ms['files']:>6} {ms['avg_needed']:>8.1f} {ms['avg_exposed']:>8.1f} {ms['waste_pct']:>6.1f}%")
+    print()
+
+    print("-" * 72)
+    print("  Per-file detail (sorted by headers needed, descending)")
+    print("-" * 72)
+    files_sorted = sorted(report["per_file"].items(), key=lambda x: x[1]["num_needed"], reverse=True)
+    print(f"  {'File':<45} {'Need':>5} {'Exp':>5} {'Waste%':>7} {'Syms':>5}")
+    for fpath, r in files_sorted:
+        fname = os.path.basename(fpath)
+        waste_pct = round(100.0 * (1 - r["num_needed"] / r["num_exposed"]), 1) if r["num_exposed"] else 0
+        print(f"  {fname:<45} {r['num_needed']:>5} {r['num_exposed']:>5} {waste_pct:>6.1f}% {r['num_symbols']:>5}")
+    print()
+    print("=" * 72)
+
+
+def print_comparison(report, baseline):
+    """Print comparison between current and baseline."""
+    s = report["summary"]
+    b = baseline["summary"]
+    d = report["distribution_needed"]
+    bd = baseline["distribution_needed"]
+
+    def delta(curr, prev, invert=False):
+        diff = curr - prev
+        if diff == 0:
+            return "  (no change)"
+        sign = "-" if diff < 0 else "+"
+        arrow = "better" if (diff < 0) != invert else "worse"
+        return f"  ({sign}{abs(diff)}) [{arrow}]"
+
+    def delta_pct(curr, prev):
+        diff = curr - prev
+        if abs(diff) < 0.05:
+            return "  (no change)"
+        sign = "-" if diff < 0 else "+"
+        arrow = "better" if diff < 0 else "worse"
+        return f"  ({sign}{abs(diff):.1f}pp) [{arrow}]"
+
+    print("=" * 72)
+    print("  WiredTiger Header Waste: Before / After Comparison")
+    print("=" * 72)
+    print()
+    print(f"  {'Metric':<35} {'Baseline':>10} {'Current':>10} {'Delta':>20}")
+    print(f"  {'-'*35} {'-'*10} {'-'*10} {'-'*20}")
+    print(f"  {'Files analyzed':<35} {b['total_files']:>10} {s['total_files']:>10}{delta(s['total_files'], b['total_files'])}")
+    print(f"  {'Overall waste %':<35} {b['overall_waste_ratio_pct']:>9.1f}% {s['overall_waste_ratio_pct']:>9.1f}%{delta_pct(s['overall_waste_ratio_pct'], b['overall_waste_ratio_pct'])}")
+    print(f"  {'Wasted (file x hdr) pairs':<35} {b['total_wasted_pairs']:>10} {s['total_wasted_pairs']:>10}{delta(s['total_wasted_pairs'], b['total_wasted_pairs'])}")
+    print(f"  {'Wasted header lines':<35} {b['total_wasted_lines']:>10} {s['total_wasted_lines']:>10}{delta(s['total_wasted_lines'], b['total_wasted_lines'])}")
+    print()
+    print(f"  {'Distribution (needed/file)':<35} {'Baseline':>10} {'Current':>10}")
+    print(f"  {'-'*35} {'-'*10} {'-'*10}")
+    for k in ["min", "p25", "median", "p75", "p90", "max", "avg"]:
+        bv = bd[k]
+        cv = d[k]
+        print(f"  {k:<35} {bv:>10} {cv:>10}{delta(cv, bv)}")
+    print()
+    print("=" * 72)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Measure header inclusion waste in WiredTiger")
+    parser.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    parser.add_argument("--baseline", metavar="FILE", help="Compare against a baseline JSON file")
+    args = parser.parse_args()
+
+    if not os.path.isfile(WTI_PATH):
+        print(f"Error: cannot find {WTI_PATH}", file=sys.stderr)
+        print("Run this script from the WiredTiger top-level directory.", file=sys.stderr)
+        sys.exit(1)
+
+    wti_headers = parse_wt_internal()
+    wti_header_keys = [os.path.relpath(h, TOP_DIR) for h in wti_headers]
+    wti_headers_set = set(wti_header_keys)
+
+    all_header_paths = list(set(wti_headers))
+    for dirpath, _dirnames, filenames in os.walk(SRC_DIR):
+        for fn in filenames:
+            if fn.endswith(".h"):
+                p = os.path.join(dirpath, fn)
+                if p not in all_header_paths:
+                    all_header_paths.append(p)
+
+    sym_map = build_symbol_to_header_map(all_header_paths)
+    header_line_counts = get_header_line_counts(all_header_paths)
+    c_files = find_c_files()
+
+    file_results = {}
+    for fpath in c_files:
+        rel = os.path.relpath(fpath, TOP_DIR)
+        result = analyze_file(fpath, sym_map, wti_headers_set, wti_header_keys)
+        if result:
+            file_results[rel] = result
+
+    report = compute_report(file_results, header_line_counts, wti_header_keys)
+
+    if args.json:
+        out = {
+            "summary": report["summary"],
+            "distribution_needed": report["distribution_needed"],
+            "top_wasted_headers": report["top_wasted_headers"],
+            "module_stats": report["module_stats"],
+            "per_file": report["per_file"],
+        }
+        json.dump(out, sys.stdout, indent=2)
+        print()
+    elif args.baseline:
+        with open(args.baseline) as f:
+            baseline = json.load(f)
+        print_comparison(report, baseline)
+    else:
+        print_report(report)
+
+
+if __name__ == "__main__":
+    main()

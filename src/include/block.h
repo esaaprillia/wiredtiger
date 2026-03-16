@@ -8,6 +8,11 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "mutex.h"
+#include "queue.h"
+#include "misc.h"
+
 /*
  * WiredTiger's block manager interface.
  */

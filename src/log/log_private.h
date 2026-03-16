@@ -290,6 +290,8 @@ struct __wti_cursor_log {
 
 /* DO NOT EDIT: automatically built by prototypes.py: BEGIN */
 
+extern bool __wti_log_is_prealloc_enabled(WT_SESSION_IMPL *session)
+  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wti_log_acquire(WT_SESSION_IMPL *session, uint64_t recsize, WTI_LOGSLOT *slot)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int __wti_log_allocfile(WT_SESSION_IMPL *session, uint32_t lognum, const char *dest)
@@ -323,15 +325,13 @@ extern int __wti_log_system_prevlsn(WT_SESSION_IMPL *session, WT_FH *log_fh, WT_
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern int64_t __wti_log_slot_release(WTI_MYSLOT *myslot, int64_t size)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
+extern void __wti_log_desc_byteswap(WTI_LOG_DESC *desc);
+extern void __wti_log_record_byteswap(WT_LOG_RECORD *record);
 extern void __wti_log_slot_activate(WT_SESSION_IMPL *session, WTI_LOGSLOT *slot);
 extern void __wti_log_slot_free(WT_SESSION_IMPL *session, WTI_LOGSLOT *slot);
 extern void __wti_log_slot_join(
   WT_SESSION_IMPL *session, uint64_t mysize, uint32_t flags, WTI_MYSLOT *myslot);
 extern void __wti_log_wrlsn(WT_SESSION_IMPL *session, int *yield);
-static WT_INLINE bool __wti_log_is_prealloc_enabled(WT_SESSION_IMPL *session)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE void __wti_log_desc_byteswap(WTI_LOG_DESC *desc);
-static WT_INLINE void __wti_log_record_byteswap(WT_LOG_RECORD *record);
 
 #ifdef HAVE_UNITTEST
 

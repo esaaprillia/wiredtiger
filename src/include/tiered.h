@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "misc.h"
+#include "queue.h"
+
 /*
  * Define the maximum number of tiers for convenience. We expect at most two initially. This can
  * change if more are needed. It is easier to have the array statically allocated initially than

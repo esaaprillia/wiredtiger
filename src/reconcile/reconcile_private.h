@@ -530,24 +530,6 @@ extern int __wti_rec_upd_select(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_I
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 extern void __wti_rec_dictionary_free(WT_SESSION_IMPL *session, WTI_RECONCILE *r);
 extern void __wti_rec_dictionary_reset(WTI_RECONCILE *r);
-static WT_INLINE bool __wti_rec_need_split(WTI_RECONCILE *r, size_t len)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE int __wti_rec_cell_build_val(WT_SESSION_IMPL *session, WTI_RECONCILE *r,
-  const void *data, size_t size, WT_TIME_WINDOW *tw, uint64_t rle, bool *ovfl_val)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE int __wti_rec_dict_replace(
-  WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_TIME_WINDOW *tw, uint64_t rle, WTI_REC_KV *val)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE int __wti_rec_get_row_leaf_key(WT_SESSION_IMPL *session, WT_BTREE *btree,
-  WTI_RECONCILE *r, WT_INSERT *ins, WT_ROW *rip, WT_ITEM *key)
-  WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE void __wti_rec_cell_build_addr(WT_SESSION_IMPL *session, WTI_RECONCILE *r,
-  WT_ADDR *addr, WT_CELL_UNPACK_ADDR *vpack, uint64_t recno, WT_PAGE_DELETED *page_del);
-static WT_INLINE void __wti_rec_image_copy(
-  WT_SESSION_IMPL *session, WTI_RECONCILE *r, WTI_REC_KV *kv);
-static WT_INLINE void __wti_rec_kv_copy(WT_SESSION_IMPL *session, uint8_t *p, WTI_REC_KV *kv);
-static WT_INLINE void __wti_rec_time_window_clear_obsolete(WT_SESSION_IMPL *session,
-  WTI_UPDATE_SELECT *upd_select, WT_CELL_UNPACK_KV *vpack, WTI_RECONCILE *r);
 
 #ifdef HAVE_UNITTEST
 

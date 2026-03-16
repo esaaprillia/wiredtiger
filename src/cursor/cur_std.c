@@ -1607,3 +1607,80 @@ __wt_debug_cursor_tree_hs(void *cursor_arg, const char *ofile)
 }
 
 #endif /* HAVE_DIAGNOSTIC */
+
+/*
+ * __wt_curhs_get_btree --
+ *     Convert a history store cursor to the underlying btree.
+ */
+WT_BTREE *
+__wt_curhs_get_btree(WT_CURSOR *cursor)
+{
+    WT_CURSOR_HS *hs_cursor;
+    hs_cursor = (WT_CURSOR_HS *)cursor;
+    return (CUR2BT(hs_cursor->file_cursor));
+}
+
+/*
+ * __wt_curhs_get_cbt --
+ *     Convert a history store cursor to the underlying btree cursor.
+ */
+WT_CURSOR_BTREE *
+__wt_curhs_get_cbt(WT_CURSOR *cursor)
+{
+    WT_CURSOR_HS *hs_cursor;
+    hs_cursor = (WT_CURSOR_HS *)cursor;
+    return ((WT_CURSOR_BTREE *)hs_cursor->file_cursor);
+}
+
+/*
+ * __wt_cursor_dhandle_decr_use --
+ *     Decrement the in-use counter in the cursor's data source.
+ */
+void
+__wt_cursor_dhandle_decr_use(WT_SESSION_IMPL *session)
+{
+    WT_DATA_HANDLE *dhandle;
+    dhandle = session->dhandle;
+    WT_ASSERT(session, __wt_atomic_load_int32_relaxed(&dhandle->session_inuse) > 0);
+    if (dhandle->timeofdeath != 0 && __wt_atomic_load_int32_relaxed(&dhandle->session_inuse) == 1)
+        dhandle->timeofdeath = 0;
+    (void)__wt_atomic_sub_int32(&dhandle->session_inuse, 1);
+}
+
+/*
+ * __wt_cursor_bound_reset --
+ *     Clear any bounds on the cursor if they are set.
+ */
+void
+__wt_cursor_bound_reset(WT_CURSOR *cursor)
+{
+    WT_SESSION_IMPL *session;
+    session = CUR2S(cursor);
+    if (WT_CURSOR_BOUNDS_SET(cursor)) {
+        WT_STAT_CONN_DSRC_INCR(session, cursor_bounds_reset);
+        F_CLR(cursor, WT_CURSTD_BOUND_UPPER | WT_CURSTD_BOUND_UPPER_INCLUSIVE);
+        __wt_buf_free(session, &cursor->upper_bound);
+        WT_CLEAR(cursor->upper_bound);
+        F_CLR(cursor, WT_CURSTD_BOUND_LOWER | WT_CURSTD_BOUND_LOWER_INCLUSIVE);
+        __wt_buf_free(session, &cursor->lower_bound);
+        WT_CLEAR(cursor->lower_bound);
+    }
+}
+
+/*
+ * __wt_cursor_free_cached_memory --
+ *     If a cached cursor is still holding memory, free it now.
+ */
+void
+__wt_cursor_free_cached_memory(WT_CURSOR *cursor)
+{
+    WT_SESSION_IMPL *session;
+    if (F_ISSET(cursor, WT_CURSTD_CACHED_WITH_MEM)) {
+        session = CUR2S(cursor);
+        __wt_buf_free(session, &cursor->key);
+        __wt_buf_free(session, &cursor->value);
+        if (!WT_PREFIX_MATCH(cursor->internal_uri, "layered:"))
+            __wt_btcur_free_cached_memory((WT_CURSOR_BTREE *)cursor);
+        F_CLR(cursor, WT_CURSTD_CACHED_WITH_MEM);
+    }
+}

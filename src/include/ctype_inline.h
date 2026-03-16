@@ -10,6 +10,8 @@
 
 #include <ctype.h>
 
+#include "misc.h"
+
 /*
  * __wt_isalnum --
  *     Wrap the ctype function without sign extension.

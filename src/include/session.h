@@ -8,6 +8,16 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "conf.h"
+#include "dhandle.h"
+#include "mutex.h"
+#include "stat.h"
+#include "misc.h"
+#include "txn.h"
+#include "../checkpoint/checkpoint.h"
+#include "queue.h"
+
 /*
  * WT_DATA_HANDLE_CACHE --
  *	Per-session cache of handles to avoid synchronization when opening

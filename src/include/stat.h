@@ -8,6 +8,11 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "wt_system.h"
+#include "misc.h"
+#include "tsan_suppress.h"
+
 /*
  * Statistics counters:
  *

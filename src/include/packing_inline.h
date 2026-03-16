@@ -8,6 +8,18 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "session.h"
+#include "connection.h"
+
+#include "extern_noninline.h"
+#include "ctype_inline.h"
+#include "intpack_inline.h"
+#include "misc_inline.h"
+
 /*
  * Throughout this code we have to be aware of default argument conversion.
  *

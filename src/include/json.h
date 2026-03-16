@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+
 /*
  * WT_JSON --
  *   Conversion between JSON formatted string and WT CONFIG ITEM.

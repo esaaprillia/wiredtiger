@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+
 /*
  * We format timestamps in a couple of ways, declare appropriate sized buffers. Hexadecimal is 2x
  * the size of the value. MongoDB format (high/low pairs of 4B unsigned integers, with surrounding

@@ -8,6 +8,18 @@
 
 #pragma once
 
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "cache.h"
+#include "connection.h"
+#include "misc.h"
+#include "session.h"
+
+#include "extern_noninline.h"
+#include "misc_inline.h"
+
 /*
  * __wt_cache_pages_inuse --
  *     Return the number of pages in use.

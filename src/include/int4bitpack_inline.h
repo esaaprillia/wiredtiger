@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "error.h"
+
 /*!!!
  *    Functions for Golomb-like small integer encoding and decoding into 4-bit chunks.
  *

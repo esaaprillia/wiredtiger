@@ -8,6 +8,9 @@
 
 #pragma once
 
+#include "wt_system.h"
+#include "wt_fwd.h"
+
 struct __wt_compact_state {
     bool dryrun;                /* Run only the estimation phase */
     uint32_t file_count;        /* Number of files seen */

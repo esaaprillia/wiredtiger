@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "wt_system.h"
+#include "wt_fwd.h"
+#include "queue.h"
+
 /*
  * Helper macros for finer-grained RTS verbose messaging categories.
  */

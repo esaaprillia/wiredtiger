@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "wt_system.h"
+#include "wt_fwd.h"
+#include "queue.h"
+
 struct __wt_dlh {
     TAILQ_ENTRY(__wt_dlh) q; /* List of open libraries. */
 

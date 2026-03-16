@@ -8,6 +8,14 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "mutex.h"
+#ifdef _WIN32
+#include "os_windows.h"
+#else
+#include "posix.h"
+#endif
+
 #define WT_THREAD_PAUSE 10 /* Thread pause timeout in seconds */
 
 /*

@@ -8,6 +8,12 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "btmem.h"
+#include "mutex.h"
+#include "misc.h"
+#include "stat.h"
+
 /*
  * Supported btree formats: the "current" version is the maximum supported major/minor versions.
  */

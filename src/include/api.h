@@ -8,6 +8,10 @@
 
 #pragma once
 
+#include "wt_fwd.h"
+#include "error.h"
+#include "misc.h"
+
 #ifdef HAVE_DIAGNOSTIC
 /*
  * Capture cases where a single session handle is used by multiple threads in parallel. The check

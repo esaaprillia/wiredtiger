@@ -6,7 +6,38 @@
  * See the file LICENSE for redistribution information.
  */
 
-#include "wt_internal.h"
+#include "wiredtiger_config.h"
+#include "wiredtiger_ext.h"
+#include "wt_system.h"
+#include "wt_compiler.h"
+#include "wt_fwd.h"
+#include "hardware.h"
+#include "swap.h"
+#include "misc.h"
+#include "os.h"
+#include "error.h"
+#include "verbose.h"
+#include "stat.h"
+#include "session.h"
+#include "connection.h"
+#include "extern_noninline.h"
+#include "misc_inline.h"
+#include "buf_inline.h"
+#include "mutex_inline.h"
+#include "os_fhandle_inline.h"
+#include "os_fs_inline.h"
+#include "packing_inline.h"
+#include "time_inline.h"
+#ifdef _WIN32
+#include "extern_win.h"
+#else
+#include "extern_posix.h"
+#ifdef __linux__
+#include "extern_linux.h"
+#elif __APPLE__
+#include "extern_darwin.h"
+#endif
+#endif
 #include "log_private.h"
 
 static int __log_newfile(WT_SESSION_IMPL *, bool, bool *, bool *);
@@ -2868,4 +2899,93 @@ __wt_log_flush(WT_SESSION_IMPL *session, uint32_t flags)
     if (LF_ISSET(WT_LOG_FSYNC))
         WT_RET(__wt_log_force_sync(session, &lsn));
     return (0);
+}
+
+/*
+ * __wti_log_desc_byteswap --
+ *     Handle big- and little-endian transformation of the log file description block.
+ */
+void
+__wti_log_desc_byteswap(WTI_LOG_DESC *desc)
+{
+#ifdef WORDS_BIGENDIAN
+    desc->log_magic = __wt_bswap32(desc->log_magic);
+    desc->version = __wt_bswap16(desc->version);
+    desc->unused = __wt_bswap16(desc->unused);
+    desc->log_size = __wt_bswap64(desc->log_size);
+#else
+    WT_UNUSED(desc);
+#endif
+}
+
+/*
+ * __wti_log_record_byteswap --
+ *     Handle big- and little-endian transformation of the log record header block.
+ */
+void
+__wti_log_record_byteswap(WT_LOG_RECORD *record)
+{
+#ifdef WORDS_BIGENDIAN
+    record->len = __wt_bswap32(record->len);
+    record->checksum = __wt_bswap32(record->checksum);
+    record->flags = __wt_bswap16(record->flags);
+    record->mem_len = __wt_bswap32(record->mem_len);
+#else
+    WT_UNUSED(record);
+#endif
+}
+
+/*
+ * __wt_lsn_file --
+ *     Return a log sequence number's file.
+ */
+uint32_t
+__wt_lsn_file(WT_LSN *lsn)
+{
+    return (__wt_atomic_load_uint32_relaxed(&lsn->l.file));
+}
+
+/*
+ * __wt_lsn_offset --
+ *     Return a log sequence number's offset.
+ */
+uint32_t
+__wt_lsn_offset(WT_LSN *lsn)
+{
+    return (__wt_atomic_load_uint32_relaxed(&lsn->l.offset));
+}
+
+/*
+ * __wt_log_cmp --
+ *     Compare 2 LSNs, return -1 if lsn1 < lsn2, 0 if lsn1 == lsn2 and 1 if lsn1 > lsn2.
+ */
+int
+__wt_log_cmp(WT_LSN *lsn1, WT_LSN *lsn2)
+{
+    uint64_t l1, l2;
+    WT_READ_ONCE(l1, lsn1->file_offset);
+    WT_READ_ONCE(l2, lsn2->file_offset);
+    return (l1 < l2 ? -1 : (l1 > l2 ? 1 : 0));
+}
+
+/*
+ * __wt_lsn_string --
+ *     Return a printable string representation of an lsn into a fixed array.
+ */
+int
+__wt_lsn_string(WT_LSN *lsn, size_t len, char *buf)
+{
+    WT_ASSERT(NULL, len >= WT_MAX_LSN_STRING);
+    return (
+      __wt_snprintf(buf, len, "%" PRIu32 ",%" PRIu32, __wt_lsn_file(lsn), __wt_lsn_offset(lsn)));
+}
+
+/*
+ * __wti_log_is_prealloc_enabled --
+ *     Check if pre-allocation is configured.
+ */
+bool
+__wti_log_is_prealloc_enabled(WT_SESSION_IMPL *session)
+{
+    return (S2C(session)->log_mgr.prealloc_init_count > 0);
 }
