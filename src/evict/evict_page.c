@@ -8,6 +8,9 @@
 
 #include "wt_internal.h"
 
+static void __evict_inplace_scrub_clean_stat_structural_skips(
+  WT_SESSION_IMPL *, WT_REF *, uint32_t);
+static int __evict_inplace_scrub_clean(WT_SESSION_IMPL *, WT_REF *);
 static int __evict_page_clean_update(WT_SESSION_IMPL *, WT_REF *, uint32_t);
 static int __evict_page_dirty_update(WT_SESSION_IMPL *, WT_REF *, uint32_t);
 static int __evict_reconcile(WT_SESSION_IMPL *, WT_REF *, uint32_t);
@@ -49,6 +52,227 @@ __evict_exclusive(WT_SESSION_IMPL *session, WT_REF *ref)
 #define WT_EVICT_STATS_FORCE_HS 0x02
 #define WT_EVICT_STATS_SUCCESS 0x04
 #define WT_EVICT_STATS_URGENT 0x08
+
+/*
+ * __evict_inplace_scrub_clean_stat_structural_skips --
+ *     For clean evictions, count at most one structural reason the page cannot be an in-place scrub
+ *     candidate (no modify, not a leaf, or no update bytes). Closing evictions are excluded.
+ */
+static void
+__evict_inplace_scrub_clean_stat_structural_skips(
+  WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
+{
+    WT_PAGE *page;
+    WT_PAGE_MODIFY *mod;
+
+    if (LF_ISSET(WT_EVICT_CALL_CLOSING))
+        return;
+
+    page = ref->page;
+    mod = page->modify;
+    if (mod == NULL) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_no_modify);
+        return;
+    }
+    if (!F_ISSET(ref, WT_REF_FLAG_LEAF)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_not_leaf);
+        return;
+    }
+    if (__wt_atomic_load_uint64_relaxed(&mod->bytes_updates) == 0) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_no_update_bytes);
+        return;
+    }
+}
+
+/*
+ * __evict_should_inplace_scrub_clean --
+ *     Policy checks for in-place scrub of a clean leaf that already holds update bytes. Caller must
+ *     ensure modify != NULL, the page is clean, the ref is a leaf, and bytes_updates > 0.
+ */
+static bool
+__evict_should_inplace_scrub_clean(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
+{
+    WT_BTREE *btree;
+    WT_CONNECTION_IMPL *conn;
+    WT_EVICT *evict;
+
+    WT_ASSERT(session, ref->page->modify != NULL);
+    WT_ASSERT(session, !__wt_page_is_modified(ref->page));
+    WT_ASSERT(session, F_ISSET(ref, WT_REF_FLAG_LEAF));
+    WT_ASSERT(session,
+      __wt_atomic_load_uint64_relaxed(&ref->page->modify->bytes_updates) > 0);
+
+    if (LF_ISSET(WT_EVICT_CALL_CLOSING)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_closing);
+        return (false);
+    }
+
+    btree = S2BT(session);
+    conn = S2C(session);
+    evict = conn->evict;
+
+    if (F_ISSET(btree, WT_BTREE_IN_MEMORY)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_btree_in_memory);
+        return (false);
+    }
+    if (F_ISSET(btree, WT_BTREE_READONLY)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_btree_readonly);
+        return (false);
+    }
+    if (F_ISSET(conn, WT_CONN_IN_MEMORY)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_conn_in_memory);
+        return (false);
+    }
+    if (WT_IS_METADATA(btree->dhandle)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_metadata);
+        return (false);
+    }
+    if (WT_IS_DISAGG_META(btree->dhandle)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_disagg_meta);
+        return (false);
+    }
+    if (WT_IS_HS(btree->dhandle)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_history_store);
+        return (false);
+    }
+    if (!F_ISSET(evict, WT_EVICT_CACHE_SCRUB)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_no_scrub_pass);
+        return (false);
+    }
+    /*
+     * Updates-driven eviction (ASC) or disaggregated storage (DSC): the latter enables scrub across a
+     * wider range of cache fill because refetch cost is higher.
+     */
+    if (!F_ISSET(evict, WT_EVICT_CACHE_UPDATES) && !__wt_conn_is_disagg(session)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction);
+        return (false);
+    }
+    if (WT_SESSION_BTREE_SYNC(session)) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_checkpoint_sync);
+        return (false);
+    }
+    if (F_ISSET(btree, WT_BTREE_DISAGGREGATED) && !conn->layered_table_manager.leader) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_skip_disagg_follower);
+        return (false);
+    }
+    return (true);
+}
+
+/*
+ * __evict_inplace_scrub_clean --
+ *     Replace a clean leaf page that still holds update chains with a fresh copy built from the
+ *     existing on-disk image. We have exclusive access (WT_REF_LOCKED). The old page—including its
+ *     modify structure and all update memory—is discarded; cache accounting (bytes_updates, etc.)
+ *     is decremented by __wt_ref_out → __wt_evict_page_cache_bytes_decr. The new page is clean
+ *     and has no modify structure, so bytes_updates drops to zero for this page.
+ */
+static int
+__evict_inplace_scrub_clean(WT_SESSION_IMPL *session, WT_REF *ref)
+{
+    WT_DECL_RET;
+    WT_PAGE *new_page, *old_page;
+    WT_PAGE_MODIFY *mod;
+    void *disk_image;
+    uint32_t page_flags;
+
+    old_page = ref->page;
+    mod = old_page->modify;
+
+    WT_ASSERT(session, !__wt_page_is_modified(old_page));
+    WT_ASSERT(session, F_ISSET(ref, WT_REF_FLAG_LEAF));
+    WT_ASSERT(session, mod != NULL);
+
+    /*
+     * An instantiated fast-truncate page carries page_del on the ref and instantiated on the modify
+     * struct. Discarding the modify struct would orphan page_del; let normal eviction handle it.
+     */
+    if (mod->instantiated) {
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_blocked_instantiated);
+        return (EBUSY);
+    }
+
+    /*
+     * Only scrub pages reconciled as a single replacement block (WT_PM_REC_REPLACE). Checkpoint
+     * saves the reconciled disk image into mod->mod_disk_image for these pages; multiblock pages
+     * have no single image to rebuild from, and rec_result == 0 pages (never reconciled or rebuilt
+     * by split_rewrite) may carry update chains for prepared transactions.
+     */
+    if (mod->rec_result != WT_PM_REC_REPLACE) {
+        if (mod->rec_result == 0)
+            WT_STAT_CONN_DSRC_INCR(
+              session, cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled);
+        else
+            WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_blocked_multiblock);
+        return (EBUSY);
+    }
+
+    /*
+     * Choose the disk image to rebuild from. Prefer mod->mod_disk_image: checkpoint saves the
+     * reconciled image there so we can rebuild even though page->dsk is stale and ref->addr is
+     * NULL after checkpoint reconciliation. Fall back to page->dsk only when ref->addr is non-NULL,
+     * meaning the page hasn't been through checkpoint and dsk is still the authoritative image.
+     */
+    page_flags = WT_PAGE_DISK_ALLOC;
+    if (mod->mod_disk_image != NULL) {
+        disk_image = mod->mod_disk_image;
+        mod->mod_disk_image = NULL;
+    } else if (old_page->dsk != NULL && ref->addr != NULL) {
+        disk_image = (void *)old_page->dsk;
+        if (F_ISSET_ATOMIC_16(old_page, WT_PAGE_DISK_ALLOC)) {
+            __wt_cache_page_image_decr(session, old_page);
+            F_CLR_ATOMIC_16(old_page, WT_PAGE_DISK_ALLOC);
+        } else
+            page_flags = 0;
+    } else {
+        if (old_page->dsk == NULL)
+            WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_blocked_no_dsk);
+        else
+            WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_blocked_stale_dsk);
+        return (EBUSY);
+    }
+
+    /*
+     * Promote mod->mod_replace to ref->addr before discarding the old page. Checkpoint
+     * reconciliation frees the original ref->addr and stores the new on-disk address in
+     * mod_replace. Without this promotion the address is lost when __wt_ref_out frees the modify
+     * struct, and a later clean eviction of the rebuilt page would see ref->addr == NULL and delete
+     * the page rather than transitioning it to WT_REF_DISK.
+     */
+    if (ref->addr == NULL && mod->mod_replace.block_cookie != NULL) {
+        WT_ADDR *addr;
+        WT_RET(__wt_calloc_one(session, &addr));
+        *addr = mod->mod_replace;
+        mod->mod_replace.block_cookie = NULL;
+        mod->mod_replace.block_cookie_size = 0;
+        ref->addr = addr;
+    }
+
+    /*
+     * Mark the page so that __wt_evict_page_cache_bytes_decr does not count this discard as
+     * eviction progress. The page is being replaced in memory, not truly evicted; inflating the
+     * progress counter would mask a stuck cache from the eviction server.
+     */
+    F_SET_ATOMIC_16(old_page, WT_PAGE_EVICT_NO_PROGRESS);
+
+    /* Discard the old page: frees modify, update chains, row/col arrays, and adjusts cache. */
+    __wt_ref_out(session, ref);
+
+    /* Build a fresh in-memory page from the disk image. */
+    WT_ERR(__wti_page_inmem(session, ref, disk_image, page_flags, &new_page, NULL));
+    WT_ASSERT(session, ref->page == new_page);
+
+    WT_REF_SET_STATE(ref, WT_REF_MEM);
+    return (0);
+
+err:
+    /*
+     * On error the disk image is orphaned (old page is gone, new page wasn't built). Free it
+     * if we own the allocation.
+     */
+    if (page_flags == WT_PAGE_DISK_ALLOC)
+        __wt_free(session, disk_image);
+    return (ret);
+}
 
 /*
  * Victim Cache Overview
@@ -319,13 +543,13 @@ __wt_evict(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE previous_state, u
     WT_PAGE *page;
     uint64_t page_size;
     uint8_t stats_flags;
-    bool clean_page, closing, ebusy_only, inmem_split, is_dirty, tree_dead;
+    bool clean_page, closing, did_inplace_scrub_clean, ebusy_only, inmem_split, is_dirty, tree_dead;
 
     conn = S2C(session);
     page = ref->page;
     closing = LF_ISSET(WT_EVICT_CALL_CLOSING);
     stats_flags = 0;
-    clean_page = ebusy_only = is_dirty = false;
+    clean_page = did_inplace_scrub_clean = ebusy_only = is_dirty = false;
 
     __wt_verbose_debug3(
       session, WT_VERB_EVICTION, "page %p (%s)", (void *)page, __wt_page_type_string(page->type));
@@ -425,13 +649,38 @@ __wt_evict(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE previous_state, u
         __wt_atomic_stats_max_uint64(
           &conn->evict->evict_max_updates_page_size_per_checkpoint, page_size);
 
+    if (!tree_dead && !is_dirty)
+        __evict_inplace_scrub_clean_stat_structural_skips(session, ref, flags);
+
     /*
-     * No need to reconcile the page if it is from a dead tree or it is clean. Stable tables on the
-     * follower are never modified, and should never be reconciled.
+     * Reconcile dirty pages for eviction. For clean leaf pages that still account for update bytes,
+     * optionally reconcile and rewrite in place (scrub) so we shed update memory without moving the
+     * page to WT_REF_DISK (which would force readers to refetch).
+     *
+     * Stable tables on the follower are never modified, and should never be reconciled.
      */
     if (!tree_dead && is_dirty) {
         WT_ASSERT(session, ref->page->disagg_info == NULL || conn->layered_table_manager.leader);
         WT_ERR(__evict_reconcile(session, ref, flags));
+    } else if (!tree_dead && !closing && !is_dirty && page->modify != NULL &&
+      F_ISSET(ref, WT_REF_FLAG_LEAF) &&
+      __wt_atomic_load_uint64_relaxed(&page->modify->bytes_updates) > 0 &&
+      __evict_should_inplace_scrub_clean(session, ref, flags)) {
+        WT_ASSERT(session, ref->page->disagg_info == NULL || conn->layered_table_manager.leader);
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_attempts);
+        ret = __evict_inplace_scrub_clean(session, ref);
+        if (ret == 0) {
+            did_inplace_scrub_clean = true;
+            goto done;
+        }
+        /*
+         * EBUSY means the page has no disk image (never written). Let eviction continue normally —
+         * the page will be evicted to disk via the clean path below.
+         */
+        if (ret == EBUSY)
+            ret = 0;
+        else
+            WT_ERR(ret);
     }
 
     /* After this spot, the only recoverable failure is EBUSY. */
@@ -465,8 +714,17 @@ __wt_evict(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE previous_state, u
          * Pages that belong to dead trees never write back to disk and can't support page splits.
          */
         WT_ERR(__evict_page_clean_update(session, ref, flags));
-    else
+    else {
+        /*
+         * If the page wasn't reconciled during this eviction (clean page with stale rec_result from
+         * a previous checkpoint), free any saved disk image. That image was preserved for in-place
+         * scrub eviction, not for the dirty-update rewrite path which would keep the page in memory.
+         */
+        if (!is_dirty && page->modify != NULL &&
+          page->modify->rec_result == WT_PM_REC_REPLACE && page->modify->mod_disk_image != NULL)
+            __wt_free(session, page->modify->mod_disk_image);
         WT_ERR(__evict_page_dirty_update(session, ref, flags));
+    }
 
     /*
      * We have loaded the new disk image and updated the tree structure. We can no longer fail after
@@ -487,8 +745,11 @@ err:
     }
 
 done:
-    if (ret == 0)
+    if (ret == 0) {
         FLD_SET(stats_flags, WT_EVICT_STATS_SUCCESS);
+        if (did_inplace_scrub_clean)
+            WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_success);
+    }
     __evict_stats_update(session, stats_flags);
 
     /* Leave any local eviction generation. */
@@ -567,10 +828,20 @@ static int
 __evict_page_clean_update(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t flags)
 {
     WT_DECL_RET;
+    WT_PAGE *page;
     bool closing, instantiated, tree_dead;
 
     closing = FLD_ISSET(flags, WT_EVICT_CALL_CLOSING);
     tree_dead = F_ISSET(session->dhandle, WT_DHANDLE_DEAD);
+    page = ref->page;
+
+    /*
+     * Observability: clean eviction with retained update chains forces a later read (unless the page
+     * was rewritten in place). Count before the page is discarded.
+     */
+    if (page->modify != NULL &&
+      __wt_atomic_load_uint64_relaxed(&page->modify->bytes_updates) > 0)
+        WT_STAT_CONN_DSRC_INCR(session, cache_eviction_in_place_scrub_fallback_evicted_to_disk);
 
     /*
      * We might discard an instantiated deleted page, because instantiated pages are not marked
@@ -1189,6 +1460,12 @@ __evict_reconcile(WT_SESSION_IMPL *session, WT_REF *ref, uint32_t evict_flags)
           "Evicting dirty internal pages for disaggregated storage is not allowed.");
         LF_SET(WT_REC_SCRUB);
     }
+
+    /*
+     * Clean leaf in-place scrub: always take the scrub path so reconciliation retains a disk image
+     * for __wt_split_rewrite (see __wt_evict).
+     */
+    /* WT_EVICT_CALL_INPLACE_CLEAN is no longer used; in-place scrub bypasses reconcile. */
 
     /*
      * Acquire a snapshot if coming through the eviction thread route. Also, if we have entered

@@ -3029,6 +3029,9 @@ __rec_write_wrapup(WT_SESSION_IMPL *session, WTI_RECONCILE *r)
         /* Discard the replacement page's address and disk image. */
         __wt_free(session, mod->mod_replace.block_cookie);
         mod->mod_replace.block_cookie_size = 0;
+        if (mod->mod_disk_image != NULL)
+            WT_STAT_CONN_DSRC_INCR(
+              session, cache_eviction_in_place_scrub_saved_image_freed_by_recon);
         __wt_free(session, mod->mod_disk_image);
         break;
     default:
@@ -3115,8 +3118,21 @@ __rec_write_wrapup(WT_SESSION_IMPL *session, WTI_RECONCILE *r)
                 if (page->disagg_info != NULL)
                     page->disagg_info->block_meta = *r->multi->block_meta;
                 WT_TIME_AGGREGATE_MERGE_OBSOLETE_VISIBLE(session, &stop_ta, &mod->mod_replace.ta);
-            } else
+            } else {
                 WT_ASSERT(session, F_ISSET(btree, WT_BTREE_DISAGGREGATED) && r->ref->addr != NULL);
+                mod->mod_disk_image = r->multi->disk_image;
+                r->multi->disk_image = NULL;
+            }
+
+            /*
+             * Save the reconciled disk image so in-place scrub eviction can rebuild the page without
+             * a disk read. For non-root pages, the image was already written to disk and
+             * r->multi->disk_image is NULL; grab the data from the reconciliation chunk buffer.
+             */
+            if (F_ISSET(r, WT_REC_CHECKPOINT) && !WT_PAGE_IS_INTERNAL(page) &&
+              mod->mod_disk_image == NULL && r->cur_ptr->image.size > 0)
+                WT_RET(__wt_memdup(session, r->cur_ptr->image.data, r->cur_ptr->image.size,
+                  &mod->mod_disk_image));
         } else {
             __wt_checkpoint_tree_reconcile_update(session, &r->multi->addr.ta);
             WT_RET(
@@ -3124,16 +3140,38 @@ __rec_write_wrapup(WT_SESSION_IMPL *session, WTI_RECONCILE *r)
                 NULL, NULL, true, F_ISSET(r, WT_REC_CHECKPOINT), r->wrapup_checkpoint_compressed));
             if (page->disagg_info != NULL)
                 page->disagg_info->block_meta = r->wrapup_checkpoint_block_meta;
+
+            /*
+             * Save the reconciled disk image so in-place scrub eviction can rebuild the page without
+             * a disk read. After checkpoint, ref->addr is freed and page->dsk is stale; without
+             * this copy the scrub path has nothing valid to rebuild from.
+             */
+            if (!WT_PAGE_IS_INTERNAL(page))
+                WT_RET(__wt_memdup(session, r->wrapup_checkpoint->data, r->wrapup_checkpoint->size,
+                  &mod->mod_disk_image));
+
             WT_TIME_AGGREGATE_MERGE_OBSOLETE_VISIBLE(session, &stop_ta, &r->multi->addr.ta);
         }
 
         mod->rec_result = WT_PM_REC_REPLACE;
+        if (!WT_PAGE_IS_INTERNAL(page)) {
+            if (F_ISSET(r, WT_REC_CHECKPOINT))
+                WT_STAT_CONN_DSRC_INCR(
+                  session, cache_eviction_in_place_scrub_checkpoint_leaf_single_block);
+            else
+                WT_STAT_CONN_DSRC_INCR(
+                  session, cache_eviction_in_place_scrub_eviction_leaf_single_block);
+        }
         break;
     default: /* Page split */
         if (WT_PAGE_IS_INTERNAL(page))
             WT_STAT_CONN_DSRC_INCR(session, rec_multiblock_internal);
-        else
+        else {
             WT_STAT_CONN_DSRC_INCR(session, rec_multiblock_leaf);
+            if (F_ISSET(r, WT_REC_CHECKPOINT))
+                WT_STAT_CONN_DSRC_INCR(
+                  session, cache_eviction_in_place_scrub_checkpoint_leaf_multiblock);
+        }
 
         /* Optionally display the actual split keys in verbose mode. */
         if (WT_VERBOSE_LEVEL_ISSET(session, WT_VERB_SPLIT, WT_VERBOSE_DEBUG_2))

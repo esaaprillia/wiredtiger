@@ -21,6 +21,7 @@
 #define WT_REC_SCRUB 0x200u
 #define WT_REC_VISIBILITY_ERR 0x400u
 #define WT_REC_VISIBLE_NO_SNAPSHOT 0x800u
+/* 0x1000u was WT_REC_INPLACE_CLEAN, now unused (in-place scrub bypasses reconcile). */
 /* AUTOMATIC FLAG VALUE GENERATION STOP 32 */
 
 /* DO NOT EDIT: automatically built by prototypes.py: BEGIN */

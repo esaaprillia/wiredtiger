@@ -156,6 +156,7 @@ struct __wt_evict {
 #define WT_EVICT_CALL_CLOSING 0x1u  /* Closing connection or tree */
 #define WT_EVICT_CALL_NO_SPLIT 0x2u /* Splits not allowed */
 #define WT_EVICT_CALL_URGENT 0x4u   /* Urgent eviction */
+/* 0x8u was WT_EVICT_CALL_INPLACE_CLEAN, now unused. */
 /* AUTOMATIC FLAG VALUE GENERATION STOP 32 */
 
 #define WT_EVICT_MAX_WORKERS 64

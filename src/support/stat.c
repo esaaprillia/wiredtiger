@@ -120,6 +120,36 @@ static const char *const __stats_dsrc_desc[] = {
   "cache: history store table writes requiring squashed modifies",
   "cache: in-memory page passed criteria to be split",
   "cache: in-memory page splits",
+  "cache: in-place scrub: attempts to replace a clean leaf page from its disk image",
+  "cache: in-place scrub: blocked because page was instantiated from a fast-truncate",
+  "cache: in-place scrub: blocked because page was not reconciled by checkpoint (rec_result == 0)",
+  "cache: in-place scrub: blocked because page was reconciled into multiple blocks (no single "
+  "image)",
+  "cache: in-place scrub: blocked, page has no on-disk image (never written to disk)",
+  "cache: in-place scrub: blocked, saved checkpoint image is NULL and page dsk is stale (ref->addr "
+  "freed)",
+  "cache: in-place scrub: checkpoint reconciled a leaf page into a single block (image saved)",
+  "cache: in-place scrub: checkpoint reconciled a leaf page into multiple blocks",
+  "cache: in-place scrub: eviction (non-checkpoint) reconciled a leaf page into a single block",
+  "cache: in-place scrub: fallback, clean page with updates evicted to disk instead",
+  "cache: in-place scrub: happy path, page successfully replaced from disk image",
+  "cache: in-place scrub: saved checkpoint image discarded by a subsequent reconciliation",
+  "cache: in-place scrub: saved checkpoint image freed during page discard (not reconciliation)",
+  "cache: in-place scrub: skipped clean+updates candidate; btree is in-memory",
+  "cache: in-place scrub: skipped clean+updates candidate; btree is read-only",
+  "cache: in-place scrub: skipped clean+updates candidate; closing eviction",
+  "cache: in-place scrub: skipped clean+updates candidate; disaggregated follower",
+  "cache: in-place scrub: skipped clean+updates candidate; disaggregated metadata",
+  "cache: in-place scrub: skipped clean+updates candidate; eviction pass has no scrub flag",
+  "cache: in-place scrub: skipped clean+updates candidate; history store",
+  "cache: in-place scrub: skipped clean+updates candidate; in-memory connection",
+  "cache: in-place scrub: skipped clean+updates candidate; metadata",
+  "cache: in-place scrub: skipped clean+updates candidate; no page modify struct",
+  "cache: in-place scrub: skipped clean+updates candidate; not a leaf page",
+  "cache: in-place scrub: skipped clean+updates candidate; not disagg and updates eviction not "
+  "active",
+  "cache: in-place scrub: skipped clean+updates candidate; session syncing btree",
+  "cache: in-place scrub: skipped clean+updates candidate; zero bytes_updates",
   "cache: internal page split blocked its eviction",
   "cache: internal pages evicted",
   "cache: internal pages split during eviction",
@@ -572,6 +602,33 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->cache_hs_write_squash = 0;
     stats->cache_inmem_splittable = 0;
     stats->cache_inmem_split = 0;
+    stats->cache_eviction_in_place_scrub_attempts = 0;
+    stats->cache_eviction_in_place_scrub_blocked_instantiated = 0;
+    stats->cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled = 0;
+    stats->cache_eviction_in_place_scrub_blocked_multiblock = 0;
+    stats->cache_eviction_in_place_scrub_blocked_no_dsk = 0;
+    stats->cache_eviction_in_place_scrub_blocked_stale_dsk = 0;
+    stats->cache_eviction_in_place_scrub_checkpoint_leaf_single_block = 0;
+    stats->cache_eviction_in_place_scrub_checkpoint_leaf_multiblock = 0;
+    stats->cache_eviction_in_place_scrub_eviction_leaf_single_block = 0;
+    stats->cache_eviction_in_place_scrub_fallback_evicted_to_disk = 0;
+    stats->cache_eviction_in_place_scrub_success = 0;
+    stats->cache_eviction_in_place_scrub_saved_image_freed_by_recon = 0;
+    stats->cache_eviction_in_place_scrub_saved_image_freed_by_discard = 0;
+    stats->cache_eviction_in_place_scrub_skip_btree_in_memory = 0;
+    stats->cache_eviction_in_place_scrub_skip_btree_readonly = 0;
+    stats->cache_eviction_in_place_scrub_skip_closing = 0;
+    stats->cache_eviction_in_place_scrub_skip_disagg_follower = 0;
+    stats->cache_eviction_in_place_scrub_skip_disagg_meta = 0;
+    stats->cache_eviction_in_place_scrub_skip_no_scrub_pass = 0;
+    stats->cache_eviction_in_place_scrub_skip_history_store = 0;
+    stats->cache_eviction_in_place_scrub_skip_conn_in_memory = 0;
+    stats->cache_eviction_in_place_scrub_skip_metadata = 0;
+    stats->cache_eviction_in_place_scrub_skip_no_modify = 0;
+    stats->cache_eviction_in_place_scrub_skip_not_leaf = 0;
+    stats->cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction = 0;
+    stats->cache_eviction_in_place_scrub_skip_checkpoint_sync = 0;
+    stats->cache_eviction_in_place_scrub_skip_no_update_bytes = 0;
     stats->cache_eviction_blocked_internal_page_split = 0;
     stats->cache_eviction_internal = 0;
     stats->cache_eviction_split_internal = 0;
@@ -1006,6 +1063,58 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
     to->cache_hs_write_squash += from->cache_hs_write_squash;
     to->cache_inmem_splittable += from->cache_inmem_splittable;
     to->cache_inmem_split += from->cache_inmem_split;
+    to->cache_eviction_in_place_scrub_attempts += from->cache_eviction_in_place_scrub_attempts;
+    to->cache_eviction_in_place_scrub_blocked_instantiated +=
+      from->cache_eviction_in_place_scrub_blocked_instantiated;
+    to->cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled +=
+      from->cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled;
+    to->cache_eviction_in_place_scrub_blocked_multiblock +=
+      from->cache_eviction_in_place_scrub_blocked_multiblock;
+    to->cache_eviction_in_place_scrub_blocked_no_dsk +=
+      from->cache_eviction_in_place_scrub_blocked_no_dsk;
+    to->cache_eviction_in_place_scrub_blocked_stale_dsk +=
+      from->cache_eviction_in_place_scrub_blocked_stale_dsk;
+    to->cache_eviction_in_place_scrub_checkpoint_leaf_single_block +=
+      from->cache_eviction_in_place_scrub_checkpoint_leaf_single_block;
+    to->cache_eviction_in_place_scrub_checkpoint_leaf_multiblock +=
+      from->cache_eviction_in_place_scrub_checkpoint_leaf_multiblock;
+    to->cache_eviction_in_place_scrub_eviction_leaf_single_block +=
+      from->cache_eviction_in_place_scrub_eviction_leaf_single_block;
+    to->cache_eviction_in_place_scrub_fallback_evicted_to_disk +=
+      from->cache_eviction_in_place_scrub_fallback_evicted_to_disk;
+    to->cache_eviction_in_place_scrub_success += from->cache_eviction_in_place_scrub_success;
+    to->cache_eviction_in_place_scrub_saved_image_freed_by_recon +=
+      from->cache_eviction_in_place_scrub_saved_image_freed_by_recon;
+    to->cache_eviction_in_place_scrub_saved_image_freed_by_discard +=
+      from->cache_eviction_in_place_scrub_saved_image_freed_by_discard;
+    to->cache_eviction_in_place_scrub_skip_btree_in_memory +=
+      from->cache_eviction_in_place_scrub_skip_btree_in_memory;
+    to->cache_eviction_in_place_scrub_skip_btree_readonly +=
+      from->cache_eviction_in_place_scrub_skip_btree_readonly;
+    to->cache_eviction_in_place_scrub_skip_closing +=
+      from->cache_eviction_in_place_scrub_skip_closing;
+    to->cache_eviction_in_place_scrub_skip_disagg_follower +=
+      from->cache_eviction_in_place_scrub_skip_disagg_follower;
+    to->cache_eviction_in_place_scrub_skip_disagg_meta +=
+      from->cache_eviction_in_place_scrub_skip_disagg_meta;
+    to->cache_eviction_in_place_scrub_skip_no_scrub_pass +=
+      from->cache_eviction_in_place_scrub_skip_no_scrub_pass;
+    to->cache_eviction_in_place_scrub_skip_history_store +=
+      from->cache_eviction_in_place_scrub_skip_history_store;
+    to->cache_eviction_in_place_scrub_skip_conn_in_memory +=
+      from->cache_eviction_in_place_scrub_skip_conn_in_memory;
+    to->cache_eviction_in_place_scrub_skip_metadata +=
+      from->cache_eviction_in_place_scrub_skip_metadata;
+    to->cache_eviction_in_place_scrub_skip_no_modify +=
+      from->cache_eviction_in_place_scrub_skip_no_modify;
+    to->cache_eviction_in_place_scrub_skip_not_leaf +=
+      from->cache_eviction_in_place_scrub_skip_not_leaf;
+    to->cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction +=
+      from->cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction;
+    to->cache_eviction_in_place_scrub_skip_checkpoint_sync +=
+      from->cache_eviction_in_place_scrub_skip_checkpoint_sync;
+    to->cache_eviction_in_place_scrub_skip_no_update_bytes +=
+      from->cache_eviction_in_place_scrub_skip_no_update_bytes;
     to->cache_eviction_blocked_internal_page_split +=
       from->cache_eviction_blocked_internal_page_split;
     to->cache_eviction_internal += from->cache_eviction_internal;
@@ -1472,6 +1581,60 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
     to->cache_hs_write_squash += WT_STAT_DSRC_READ(from, cache_hs_write_squash);
     to->cache_inmem_splittable += WT_STAT_DSRC_READ(from, cache_inmem_splittable);
     to->cache_inmem_split += WT_STAT_DSRC_READ(from, cache_inmem_split);
+    to->cache_eviction_in_place_scrub_attempts +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_attempts);
+    to->cache_eviction_in_place_scrub_blocked_instantiated +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_blocked_instantiated);
+    to->cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled);
+    to->cache_eviction_in_place_scrub_blocked_multiblock +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_blocked_multiblock);
+    to->cache_eviction_in_place_scrub_blocked_no_dsk +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_blocked_no_dsk);
+    to->cache_eviction_in_place_scrub_blocked_stale_dsk +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_blocked_stale_dsk);
+    to->cache_eviction_in_place_scrub_checkpoint_leaf_single_block +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_checkpoint_leaf_single_block);
+    to->cache_eviction_in_place_scrub_checkpoint_leaf_multiblock +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_checkpoint_leaf_multiblock);
+    to->cache_eviction_in_place_scrub_eviction_leaf_single_block +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_eviction_leaf_single_block);
+    to->cache_eviction_in_place_scrub_fallback_evicted_to_disk +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_fallback_evicted_to_disk);
+    to->cache_eviction_in_place_scrub_success +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_success);
+    to->cache_eviction_in_place_scrub_saved_image_freed_by_recon +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_saved_image_freed_by_recon);
+    to->cache_eviction_in_place_scrub_saved_image_freed_by_discard +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_saved_image_freed_by_discard);
+    to->cache_eviction_in_place_scrub_skip_btree_in_memory +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_btree_in_memory);
+    to->cache_eviction_in_place_scrub_skip_btree_readonly +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_btree_readonly);
+    to->cache_eviction_in_place_scrub_skip_closing +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_closing);
+    to->cache_eviction_in_place_scrub_skip_disagg_follower +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_disagg_follower);
+    to->cache_eviction_in_place_scrub_skip_disagg_meta +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_disagg_meta);
+    to->cache_eviction_in_place_scrub_skip_no_scrub_pass +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_no_scrub_pass);
+    to->cache_eviction_in_place_scrub_skip_history_store +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_history_store);
+    to->cache_eviction_in_place_scrub_skip_conn_in_memory +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_conn_in_memory);
+    to->cache_eviction_in_place_scrub_skip_metadata +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_metadata);
+    to->cache_eviction_in_place_scrub_skip_no_modify +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_no_modify);
+    to->cache_eviction_in_place_scrub_skip_not_leaf +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_not_leaf);
+    to->cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction += WT_STAT_DSRC_READ(
+      from, cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction);
+    to->cache_eviction_in_place_scrub_skip_checkpoint_sync +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_checkpoint_sync);
+    to->cache_eviction_in_place_scrub_skip_no_update_bytes +=
+      WT_STAT_DSRC_READ(from, cache_eviction_in_place_scrub_skip_no_update_bytes);
     to->cache_eviction_blocked_internal_page_split +=
       WT_STAT_DSRC_READ(from, cache_eviction_blocked_internal_page_split);
     to->cache_eviction_internal += WT_STAT_DSRC_READ(from, cache_eviction_internal);
@@ -2110,6 +2273,36 @@ static const char *const __stats_connection_desc[] = {
   "cache: history store table writes requiring squashed modifies",
   "cache: in-memory page passed criteria to be split",
   "cache: in-memory page splits",
+  "cache: in-place scrub: attempts to replace a clean leaf page from its disk image",
+  "cache: in-place scrub: blocked because page was instantiated from a fast-truncate",
+  "cache: in-place scrub: blocked because page was not reconciled by checkpoint (rec_result == 0)",
+  "cache: in-place scrub: blocked because page was reconciled into multiple blocks (no single "
+  "image)",
+  "cache: in-place scrub: blocked, page has no on-disk image (never written to disk)",
+  "cache: in-place scrub: blocked, saved checkpoint image is NULL and page dsk is stale (ref->addr "
+  "freed)",
+  "cache: in-place scrub: checkpoint reconciled a leaf page into a single block (image saved)",
+  "cache: in-place scrub: checkpoint reconciled a leaf page into multiple blocks",
+  "cache: in-place scrub: eviction (non-checkpoint) reconciled a leaf page into a single block",
+  "cache: in-place scrub: fallback, clean page with updates evicted to disk instead",
+  "cache: in-place scrub: happy path, page successfully replaced from disk image",
+  "cache: in-place scrub: saved checkpoint image discarded by a subsequent reconciliation",
+  "cache: in-place scrub: saved checkpoint image freed during page discard (not reconciliation)",
+  "cache: in-place scrub: skipped clean+updates candidate; btree is in-memory",
+  "cache: in-place scrub: skipped clean+updates candidate; btree is read-only",
+  "cache: in-place scrub: skipped clean+updates candidate; closing eviction",
+  "cache: in-place scrub: skipped clean+updates candidate; disaggregated follower",
+  "cache: in-place scrub: skipped clean+updates candidate; disaggregated metadata",
+  "cache: in-place scrub: skipped clean+updates candidate; eviction pass has no scrub flag",
+  "cache: in-place scrub: skipped clean+updates candidate; history store",
+  "cache: in-place scrub: skipped clean+updates candidate; in-memory connection",
+  "cache: in-place scrub: skipped clean+updates candidate; metadata",
+  "cache: in-place scrub: skipped clean+updates candidate; no page modify struct",
+  "cache: in-place scrub: skipped clean+updates candidate; not a leaf page",
+  "cache: in-place scrub: skipped clean+updates candidate; not disagg and updates eviction not "
+  "active",
+  "cache: in-place scrub: skipped clean+updates candidate; session syncing btree",
+  "cache: in-place scrub: skipped clean+updates candidate; zero bytes_updates",
   "cache: internal page split blocked its eviction",
   "cache: internal pages evicted",
   "cache: internal pages queued for eviction",
@@ -3171,6 +3364,33 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->cache_hs_write_squash = 0;
     stats->cache_inmem_splittable = 0;
     stats->cache_inmem_split = 0;
+    stats->cache_eviction_in_place_scrub_attempts = 0;
+    stats->cache_eviction_in_place_scrub_blocked_instantiated = 0;
+    stats->cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled = 0;
+    stats->cache_eviction_in_place_scrub_blocked_multiblock = 0;
+    stats->cache_eviction_in_place_scrub_blocked_no_dsk = 0;
+    stats->cache_eviction_in_place_scrub_blocked_stale_dsk = 0;
+    stats->cache_eviction_in_place_scrub_checkpoint_leaf_single_block = 0;
+    stats->cache_eviction_in_place_scrub_checkpoint_leaf_multiblock = 0;
+    stats->cache_eviction_in_place_scrub_eviction_leaf_single_block = 0;
+    stats->cache_eviction_in_place_scrub_fallback_evicted_to_disk = 0;
+    stats->cache_eviction_in_place_scrub_success = 0;
+    stats->cache_eviction_in_place_scrub_saved_image_freed_by_recon = 0;
+    stats->cache_eviction_in_place_scrub_saved_image_freed_by_discard = 0;
+    stats->cache_eviction_in_place_scrub_skip_btree_in_memory = 0;
+    stats->cache_eviction_in_place_scrub_skip_btree_readonly = 0;
+    stats->cache_eviction_in_place_scrub_skip_closing = 0;
+    stats->cache_eviction_in_place_scrub_skip_disagg_follower = 0;
+    stats->cache_eviction_in_place_scrub_skip_disagg_meta = 0;
+    stats->cache_eviction_in_place_scrub_skip_no_scrub_pass = 0;
+    stats->cache_eviction_in_place_scrub_skip_history_store = 0;
+    stats->cache_eviction_in_place_scrub_skip_conn_in_memory = 0;
+    stats->cache_eviction_in_place_scrub_skip_metadata = 0;
+    stats->cache_eviction_in_place_scrub_skip_no_modify = 0;
+    stats->cache_eviction_in_place_scrub_skip_not_leaf = 0;
+    stats->cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction = 0;
+    stats->cache_eviction_in_place_scrub_skip_checkpoint_sync = 0;
+    stats->cache_eviction_in_place_scrub_skip_no_update_bytes = 0;
     stats->cache_eviction_blocked_internal_page_split = 0;
     stats->cache_eviction_internal = 0;
     stats->eviction_internal_pages_queued = 0;
@@ -4278,6 +4498,60 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->cache_hs_write_squash += WT_STAT_CONN_READ(from, cache_hs_write_squash);
     to->cache_inmem_splittable += WT_STAT_CONN_READ(from, cache_inmem_splittable);
     to->cache_inmem_split += WT_STAT_CONN_READ(from, cache_inmem_split);
+    to->cache_eviction_in_place_scrub_attempts +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_attempts);
+    to->cache_eviction_in_place_scrub_blocked_instantiated +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_blocked_instantiated);
+    to->cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_blocked_not_checkpoint_reconciled);
+    to->cache_eviction_in_place_scrub_blocked_multiblock +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_blocked_multiblock);
+    to->cache_eviction_in_place_scrub_blocked_no_dsk +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_blocked_no_dsk);
+    to->cache_eviction_in_place_scrub_blocked_stale_dsk +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_blocked_stale_dsk);
+    to->cache_eviction_in_place_scrub_checkpoint_leaf_single_block +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_checkpoint_leaf_single_block);
+    to->cache_eviction_in_place_scrub_checkpoint_leaf_multiblock +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_checkpoint_leaf_multiblock);
+    to->cache_eviction_in_place_scrub_eviction_leaf_single_block +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_eviction_leaf_single_block);
+    to->cache_eviction_in_place_scrub_fallback_evicted_to_disk +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_fallback_evicted_to_disk);
+    to->cache_eviction_in_place_scrub_success +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_success);
+    to->cache_eviction_in_place_scrub_saved_image_freed_by_recon +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_saved_image_freed_by_recon);
+    to->cache_eviction_in_place_scrub_saved_image_freed_by_discard +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_saved_image_freed_by_discard);
+    to->cache_eviction_in_place_scrub_skip_btree_in_memory +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_btree_in_memory);
+    to->cache_eviction_in_place_scrub_skip_btree_readonly +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_btree_readonly);
+    to->cache_eviction_in_place_scrub_skip_closing +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_closing);
+    to->cache_eviction_in_place_scrub_skip_disagg_follower +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_disagg_follower);
+    to->cache_eviction_in_place_scrub_skip_disagg_meta +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_disagg_meta);
+    to->cache_eviction_in_place_scrub_skip_no_scrub_pass +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_no_scrub_pass);
+    to->cache_eviction_in_place_scrub_skip_history_store +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_history_store);
+    to->cache_eviction_in_place_scrub_skip_conn_in_memory +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_conn_in_memory);
+    to->cache_eviction_in_place_scrub_skip_metadata +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_metadata);
+    to->cache_eviction_in_place_scrub_skip_no_modify +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_no_modify);
+    to->cache_eviction_in_place_scrub_skip_not_leaf +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_not_leaf);
+    to->cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction += WT_STAT_CONN_READ(
+      from, cache_eviction_in_place_scrub_skip_not_disagg_without_updates_eviction);
+    to->cache_eviction_in_place_scrub_skip_checkpoint_sync +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_checkpoint_sync);
+    to->cache_eviction_in_place_scrub_skip_no_update_bytes +=
+      WT_STAT_CONN_READ(from, cache_eviction_in_place_scrub_skip_no_update_bytes);
     to->cache_eviction_blocked_internal_page_split +=
       WT_STAT_CONN_READ(from, cache_eviction_blocked_internal_page_split);
     to->cache_eviction_internal += WT_STAT_CONN_READ(from, cache_eviction_internal);
