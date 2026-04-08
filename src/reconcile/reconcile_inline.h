@@ -545,6 +545,12 @@ __wti_rec_time_window_clear_obsolete(WT_SESSION_IMPL *session, WTI_UPDATE_SELECT
             /* The durable timestamp should never be less than the start timestamp. */
             WT_ASSERT(session, tw->start_ts <= tw->durable_start_ts);
 
+            if (upd_select != NULL) {
+                upd_select->tw_start_cleared = true;
+                upd_select->orig_start_ts = tw->start_ts;
+                upd_select->orig_start_txn = tw->start_txn;
+            }
+
             tw->start_ts = tw->durable_start_ts = WT_TS_NONE;
             tw->start_txn = WT_TXN_NONE;
 
