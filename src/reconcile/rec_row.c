@@ -11,36 +11,6 @@
 #include "reconcile_inline.h"
 
 /*
- * Diagnostic macro: emit one KEY-SUMMARY line per reconciled key for btree_id=16. Captures the key,
- * the reconciliation decision, time window before/after clearing, and key flags so a single-key
- * lifecycle can be reconstructed from the log.
- */
-#define REC_LOG_KEY_SUMMARY(                                                                     \
-  session, btree, key_data, key_size, decision, twp, v3_orig_tw, upd_select, r)                  \
-    do {                                                                                         \
-        if ((btree)->id == 16 && (upd_select).tw_start_cleared &&                               \
-          (strcmp((decision), "TOMBSTONE-SKIP") == 0 ||                                          \
-            strcmp((decision), "UPD-STANDARD") == 0 ||                                          \
-            strcmp((decision), "UPD-MODIFY") == 0)) {                                           \
-            fprintf(stderr,                                                                      \
-              "[REC-LOG] KEY-SUMMARY: btree_id=16 key=%.*s decision=%s"                          \
-              " tw=[%" PRIu64 ",%" PRIu64 "]-[%" PRIu64 ",%" PRIu64                              \
-              "]"                                                                                \
-              " orig_tw=[%" PRIu64 ",%" PRIu64 "]-[%" PRIu64 ",%" PRIu64                         \
-              "]"                                                                                \
-              " upd_saved=%d tombstone_gv=%d no_ts_tombstone=%d tw_cleared=%d"                   \
-              " rec_flags=0x%x oldest_id=%" PRIu64 " pinned_ts=%" PRIu64 "\n",                   \
-              (int)(key_size), (const char *)(key_data), (decision), (twp)->start_ts,            \
-              (twp)->start_txn, (twp)->stop_ts, (twp)->stop_txn, (v3_orig_tw).start_ts,          \
-              (v3_orig_tw).start_txn, (v3_orig_tw).stop_ts, (v3_orig_tw).stop_txn,               \
-              (int)(upd_select).upd_saved, (int)(upd_select).tombstone_globally_visible,         \
-              (int)(upd_select).no_ts_tombstone, (int)(upd_select).tw_start_cleared, (r)->flags, \
-              __wt_txn_oldest_id(session), (r)->rec_start_pinned_ts);                            \
-            fflush(stderr);                                                                      \
-        }                                                                                        \
-    } while (0)
-
-/*
  * __rec_key_state_update --
  *     Update prefix and suffix compression based on the last key.
  */
@@ -1149,11 +1119,6 @@ __wti_rec_row_leaf(
         }
         dictionary = false;
 
-        /* V3 per-key lifecycle tracking (btree_id=16 only). */
-        const char *v3_decision = NULL;
-        WT_TIME_WINDOW v3_orig_tw;
-        WT_TIME_WINDOW_INIT(&v3_orig_tw);
-
         /*
          * Figure out if the key is an overflow key, and in that case unpack the cell, we'll need it
          * later.
@@ -1168,10 +1133,6 @@ __wti_rec_row_leaf(
 
         /* Unpack the on-page value cell. */
         __wt_row_leaf_value_cell(session, page, rip, vpack);
-
-        /* Save on-disk TW before upd_select may alter it (for v3 lifecycle logging). */
-        if (btree->id == 16)
-            v3_orig_tw = vpack->tw;
 
         /* Look for an update. */
         WT_ERR(__wti_rec_upd_select(session, r, NULL, rip, vpack, &upd_select));
@@ -1188,16 +1149,8 @@ __wti_rec_row_leaf(
               !F_ISSET(conn, WT_CONN_PRESERVE_PREPARED) || F_ISSET(btree, WT_BTREE_IN_MEMORY) ||
                 !WT_TIME_WINDOW_HAS_PREPARE(twp),
               "leaked prepared update.");
-        } else {
+        } else
             twp = &upd_select.tw;
-            /*
-             * For v3 logging: when an update was selected, save the post-upd-select TW as orig_tw.
-             * The upd_select TW may have already had start_ts cleared inside __wti_rec_upd_select;
-             * the tw_start_cleared flag records whether that happened and what the original was.
-             */
-            if (btree->id == 16)
-                v3_orig_tw = upd_select.tw;
-        }
 
         /*
          * If we reconcile an on disk key with a globally visible stop time point and there are no
@@ -1211,31 +1164,10 @@ __wti_rec_row_leaf(
              * hasn't been included in the oldest checkpoint currently in use.
              */
             if (__wt_txn_tw_stop_visible_all(session, twp)) {
-                if (btree->id == 16) {
-                    fprintf(stderr,
-                      "[REC-LOG] REMOVE-FROM-DISK(stop-visible-all): btree_id=%" PRIu32
-                      " key=%.*s tw.stop_ts=%" PRIu64 " tw.stop_txn=%" PRIu64
-                      " tw.start_ts=%" PRIu64 " tw.start_txn=%" PRIu64
-                      " rec_flags=0x%x oldest_id=%" PRIu64 "\n",
-                      btree->id, (int)key_size, (const char *)key_data, twp->stop_ts, twp->stop_txn,
-                      twp->start_ts, twp->start_txn, r->flags, __wt_txn_oldest_id(session));
-                    fflush(stderr);
-                }
-                v3_decision = "REMOVE-STOP-VISIBLE";
                 upd = &upd_tombstone;
                 r->key_removed_from_disk_image = true;
             } else if (F_ISSET(btree, WT_BTREE_GARBAGE_COLLECT) &&
               __rec_row_garbage_collect_tw_eligible(r, twp)) {
-                if (btree->id == 16) {
-                    fprintf(stderr,
-                      "[REC-LOG] REMOVE-FROM-DISK(gc): btree_id=%" PRIu32
-                      " key=%.*s tw.stop_ts=%" PRIu64 " tw.stop_txn=%" PRIu64
-                      " rec_prune_ts=%" PRIu64 " rec_start_oldest_id=%" PRIu64 "\n",
-                      btree->id, (int)key_size, (const char *)key_data, twp->stop_ts, twp->stop_txn,
-                      r->rec_prune_timestamp, r->rec_start_oldest_id);
-                    fflush(stderr);
-                }
-                v3_decision = "REMOVE-GC";
                 upd = &upd_tombstone;
                 r->key_removed_from_disk_image = true;
                 WT_STAT_CONN_DSRC_INCR(session, rec_ingest_garbage_collection_keys_disk_image);
@@ -1257,12 +1189,10 @@ __wti_rec_row_leaf(
              * Repack the cell if we clear the transaction ids in the cell.
              */
             if (vpack->raw == WT_CELL_VALUE_COPY) {
-                v3_decision = "ONDISK-TW-CLEARED";
                 WT_ERR(__rec_cell_repack(session, r, vpack, twp));
 
                 dictionary = true;
             } else if (F_ISSET(vpack, WT_CELL_UNPACK_TIME_WINDOW_CLEARED)) {
-                v3_decision = "ONDISK-TW-CLEARED";
                 /*
                  * The transaction ids are cleared after restart. Repack the cell to flush the
                  * cleared transaction ids.
@@ -1282,7 +1212,6 @@ __wti_rec_row_leaf(
 
                 dictionary = true;
             } else {
-                v3_decision = "ONDISK-ASIS";
                 val->buf.data = vpack->cell;
                 val->buf.size = __wt_cell_total_len(vpack);
                 val->cell_len = 0;
@@ -1305,7 +1234,6 @@ __wti_rec_row_leaf(
 
             switch (upd->type) {
             case WT_UPDATE_MODIFY:
-                v3_decision = "UPD-MODIFY";
                 cbt->slot = WT_ROW_SLOT(page, rip);
                 WT_ERR(__wt_modify_reconstruct_from_upd_list(
                   session, cbt, upd, cbt->upd_value, WT_OPCTX_RECONCILATION));
@@ -1315,13 +1243,11 @@ __wti_rec_row_leaf(
                 dictionary = true;
                 break;
             case WT_UPDATE_STANDARD:
-                v3_decision = "UPD-STANDARD";
                 /* Take the value from the update. */
                 WT_ERR(__wti_rec_cell_build_val(session, r, upd->data, upd->size, twp, 0, NULL));
                 dictionary = true;
                 break;
             case WT_UPDATE_TOMBSTONE:
-                v3_decision = "TOMBSTONE-SKIP";
                 /*
                  * If this key/value pair was deleted, we're done.
                  *
@@ -1361,11 +1287,8 @@ __wti_rec_row_leaf(
             }
 
             /* Proceed with appended key/value pairs. */
-            if (upd->type == WT_UPDATE_TOMBSTONE) {
-                REC_LOG_KEY_SUMMARY(
-                  session, btree, key_data, key_size, v3_decision, twp, v3_orig_tw, upd_select, r);
+            if (upd->type == WT_UPDATE_TOMBSTONE)
                 goto leaf_insert;
-            }
         }
 
         /*
@@ -1471,10 +1394,6 @@ slow:
 
         /* Update compression state. */
         __rec_key_state_update(r, ovfl_key);
-
-        /* V3: emit KEY-SUMMARY for keys written to the disk image. */
-        REC_LOG_KEY_SUMMARY(
-          session, btree, key_data, key_size, v3_decision, twp, v3_orig_tw, upd_select, r);
 
 leaf_insert:
         /* Write any K/V pairs inserted into the page after this key. */

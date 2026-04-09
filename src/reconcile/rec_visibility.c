@@ -1288,7 +1288,6 @@ __rec_fill_tw_from_upd_select(WT_SESSION_IMPL *session, WT_PAGE *page, WT_CELL_U
          * related updates in the history store, potentially causing data inconsistencies.
          */
         tombstone_globally_visible = __wt_txn_upd_visible_all(session, upd);
-        upd_select->tombstone_globally_visible = tombstone_globally_visible;
         if (write_prepare || (F_ISSET(r, WT_REC_HS) && upd->upd_start_ts == WT_TS_NONE) ||
           !tombstone_globally_visible) {
             uint64_t next_txnid = WT_TXN_NONE;
@@ -1568,16 +1567,6 @@ __wti_rec_upd_select(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_INSERT *ins,
             upd_select->tw.stop_ts == WT_TS_NONE)) {
             WT_ASSERT(session, upd_select->tw.stop_ts == WT_TS_NONE);
             upd_select->no_ts_tombstone = true;
-            if (S2BT(session)->id == 16) {
-                fprintf(stderr,
-                  "[REC-LOG] NO-TS-TOMBSTONE: btree_id=%" PRIu32 " tw.stop_ts=%" PRIu64
-                  " tw.stop_txn=%" PRIu64 " tw.start_ts=%" PRIu64 " tw.start_txn=%" PRIu64
-                  " tombstone_txnid=%" PRIu64 " rec_flags=0x%x\n",
-                  S2BT(session)->id, upd_select->tw.stop_ts, upd_select->tw.stop_txn,
-                  upd_select->tw.start_ts, upd_select->tw.start_txn,
-                  __wt_atomic_load_uint64_v_acquire(&upd_select->tombstone->txnid), r->flags);
-                fflush(stderr);
-            }
         }
     }
 
