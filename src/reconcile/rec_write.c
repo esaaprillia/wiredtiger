@@ -275,6 +275,20 @@ __reconcile(WT_SESSION_IMPL *session, WT_REF *ref, WT_SALVAGE_COOKIE *salvage, u
     if (*page_lockedp)
         WT_ASSERT_SPINLOCK_OWNED(session, &page->modify->page_lock);
 
+    /* BF42097: log every reconciliation of our target table. */
+    if (session->dhandle != NULL && session->dhandle->name != NULL &&
+      strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+        fprintf(stderr,
+          "BF42097: __reconcile entry page=%p ref=%p type=%s flags=0x%x ckpt_running=%d hs=%d evict=%d "
+          "dsk=%p write_gen=%" PRIu64 " mod=%p prev_rec_result=%u\n",
+          (void *)page, (void *)ref, __wt_page_type_str(page->type), flags,
+          (flags & WT_REC_CHECKPOINT_RUNNING) ? 1 : 0, (flags & WT_REC_HS) ? 1 : 0,
+          (flags & WT_REC_EVICT) ? 1 : 0,
+          (void *)page->dsk, (page->dsk != NULL) ? page->dsk->write_gen : 0,
+          (void *)page->modify,
+          (page->modify != NULL) ? (unsigned)page->modify->rec_result : 0);
+    }
+
     /* Save the eviction state. */
     __reconcile_save_evict_state(session, ref, flags);
 

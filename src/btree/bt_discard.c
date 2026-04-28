@@ -553,6 +553,22 @@ __wt_free_obsolete_updates(WT_SESSION_IMPL *session, WT_PAGE *page, WT_UPDATE *v
 
     size = 0;
 
+    /* BF42097: log who's freeing what (target table only). */
+    if (session->dhandle != NULL && session->dhandle->name != NULL &&
+      strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+        WT_UPDATE *_u = visible_all_upd->next;
+        fprintf(stderr,
+          "BF42097: free_obsolete_updates page=%p visible_all_upd=%p(type=%u flags=0x%x "
+          "durable=%" PRIu64 " start=%" PRIu64 ")",
+          (void *)page, (void *)visible_all_upd, (unsigned)visible_all_upd->type,
+          (unsigned)visible_all_upd->flags, visible_all_upd->upd_durable_ts,
+          visible_all_upd->upd_start_ts);
+        for (; _u != NULL; _u = _u->next)
+            fprintf(stderr, " -> freeing[type=%u flags=0x%x durable=%" PRIu64 " start=%" PRIu64 "]",
+              (unsigned)_u->type, (unsigned)_u->flags, _u->upd_durable_ts, _u->upd_start_ts);
+        fprintf(stderr, "\n");
+    }
+
     next = visible_all_upd->next;
 
     /*

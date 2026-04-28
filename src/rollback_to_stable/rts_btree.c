@@ -259,6 +259,15 @@ __rts_btree_col_modify(WT_SESSION_IMPL *session, WT_REF *ref, WT_UPDATE **updp, 
     if (!dryrun)
         WT_ERR(__wt_col_modify(&cbt, recno, NULL, updp, WT_UPDATE_INVALID, true, false));
 
+    /* BF42097: after col modify, check whether page was marked dirty. */
+    if (session->dhandle != NULL && session->dhandle->name != NULL &&
+      strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+        fprintf(stderr,
+          "BF42097: col_modify done page=%p recno=%" PRIu64 " modify=%p is_modified=%d dryrun=%d\n",
+          (void *)ref->page, recno, (void *)ref->page->modify,
+          __wt_page_is_modified(ref->page) ? 1 : 0, dryrun ? 1 : 0);
+    }
+
 err:
     /* Free any resources that may have been cached in the cursor. */
     WT_TRET(__wt_btcur_close(&cbt, true));
@@ -288,6 +297,25 @@ __rts_btree_row_modify(WT_SESSION_IMPL *session, WT_REF *ref, WT_UPDATE **updp, 
     /* Apply the modification. */
     if (!dryrun)
         WT_ERR(__wt_row_modify(&cbt, key, NULL, updp, WT_UPDATE_INVALID, true, false));
+
+    /* BF42097: after modify, check whether page was marked dirty and dump the attached update. */
+    if (session->dhandle != NULL && session->dhandle->name != NULL &&
+      strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+        WT_UPDATE *_head = (updp != NULL) ? *updp : NULL;
+        fprintf(stderr,
+          "BF42097: row_modify done page=%p modify=%p is_modified=%d dryrun=%d "
+          "head_upd=%p type=%u start_ts=%" PRIu64 " durable_ts=%" PRIu64
+          " txnid=%" PRIu64 " flags=0x%x has_next=%d\n",
+          (void *)ref->page, (void *)ref->page->modify,
+          __wt_page_is_modified(ref->page) ? 1 : 0, dryrun ? 1 : 0,
+          (void *)_head,
+          (_head != NULL) ? (unsigned)_head->type : 0,
+          (_head != NULL) ? _head->upd_start_ts : 0,
+          (_head != NULL) ? _head->upd_durable_ts : 0,
+          (_head != NULL) ? _head->txnid : 0,
+          (_head != NULL) ? (unsigned)_head->flags : 0,
+          (_head != NULL && _head->next != NULL) ? 1 : 0);
+    }
 
 err:
     /* Free any resources that may have been cached in the cursor. */
@@ -694,6 +722,17 @@ __rts_btree_abort_ondisk_kv(WT_SESSION_IMPL *session, WT_REF *ref, WT_ROW *rip, 
     /* Retrieve the time window from the unpacked value cell. */
     __wt_cell_get_tw(vpack, &tw);
 
+    /* BF42097: log every on-disk cell RTS visits in our target table. */
+    if (session->dhandle != NULL && session->dhandle->name != NULL &&
+      strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+        fprintf(stderr,
+          "BF42097: abort_ondisk_kv entry page=%p ref=%p durable_start=%" PRIu64
+          " start=%" PRIu64 " durable_stop=%" PRIu64 " stop=%" PRIu64
+          " has_stop=%d start_txn=%" PRIu64 " rollback_ts=%" PRIu64 "\n",
+          (void *)page, (void *)ref, tw->durable_start_ts, tw->start_ts, tw->durable_stop_ts,
+          tw->stop_ts, WT_TIME_WINDOW_HAS_STOP(tw) ? 1 : 0, tw->start_txn, rollback_timestamp);
+    }
+
     prepared = WT_TIME_WINDOW_HAS_PREPARE(tw);
     if (WT_IS_HS(session->dhandle)) {
         /*
@@ -1068,6 +1107,15 @@ __wti_rts_btree_abort_updates(
      */
     page = ref->page;
     modified = __wt_page_is_modified(page);
+    /* BF42097: log RTS entry to each page of our target table. */
+    if (session->dhandle != NULL && session->dhandle->name != NULL &&
+      strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+        fprintf(stderr,
+          "BF42097: rts_abort_updates entry page=%p ref=%p type=%s modified_before=%d "
+          "dsk=%p write_gen=%" PRIu64 "\n",
+          (void *)page, (void *)ref, __wt_page_type_str(page->type), modified ? 1 : 0,
+          (void *)page->dsk, (page->dsk != NULL) ? page->dsk->write_gen : 0);
+    }
     if (!modified && !__wti_rts_visibility_page_needs_abort(session, ref, rollback_timestamp)) {
         __wt_verbose_level_multi(session, WT_VERB_RECOVERY_RTS(session), WT_VERBOSE_DEBUG_3,
           WT_RTS_VERB_TAG_SKIP_UNMODIFIED "ref=%p: unmodified stable page of type=%s skipped",
@@ -1099,5 +1147,12 @@ __wti_rts_btree_abort_updates(
     /* Mark the page as dirty to reconcile the page. */
     if (!dryrun && page->modify)
         __wt_page_modify_set(session, page);
+    /* BF42097: log RTS exit state. */
+    if (session->dhandle != NULL && session->dhandle->name != NULL &&
+      strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+        fprintf(stderr,
+          "BF42097: rts_abort_updates exit  page=%p modify=%p is_modified_after=%d\n",
+          (void *)page, (void *)page->modify, __wt_page_is_modified(page) ? 1 : 0);
+    }
     return (0);
 }

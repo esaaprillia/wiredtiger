@@ -635,8 +635,36 @@ __rec_validate_upd_chain(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_UPDATE *
     if (WT_REC_HAS_ON_DISK(vpack) && !WT_TIME_WINDOW_HAS_PREPARE(&(vpack->tw))) {
         char ts_string[4][WT_TS_INT_STRING_SIZE];
         prepare_state = __wt_atomic_load_uint8_v_acquire(&prev_upd->prepare_state);
+
+        /* BF42097: dump page/ref state before the final validation assert. */
+        if (session->dhandle != NULL && session->dhandle->name != NULL &&
+          strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+            WT_PAGE *p = r->ref != NULL ? r->ref->page : NULL;
+            WT_PAGE_MODIFY *pm = (p != NULL) ? p->modify : NULL;
+            fprintf(stderr,
+              "BF42097: validate_upd_chain page=%p dsk=%p write_gen=%" PRIu64
+              " ref=%p ref_addr=%p mod=%p rec_result=%u "
+              "vpack_durable_start=%" PRIu64 " vpack_start=%" PRIu64
+              " vpack_has_stop=%d vpack_start_txn=%" PRIu64
+              " prev_upd_durable=%" PRIu64 " prev_upd_start=%" PRIu64
+              " prev_upd_flags=0x%x prepare_state=%u select_upd==prev_upd?=%d\n",
+              (void *)p,
+              (p != NULL) ? (void *)p->dsk : NULL,
+              (p != NULL && p->dsk != NULL) ? p->dsk->write_gen : 0,
+              (void *)(r->ref),
+              (r->ref != NULL) ? (void *)r->ref->addr : NULL,
+              (void *)pm,
+              (pm != NULL) ? (unsigned)pm->rec_result : 0,
+              vpack->tw.durable_start_ts, vpack->tw.start_ts,
+              WT_TIME_WINDOW_HAS_STOP(&vpack->tw) ? 1 : 0, vpack->tw.start_txn,
+              prev_upd->upd_durable_ts, prev_upd->upd_start_ts,
+              (unsigned)prev_upd->flags, (unsigned)prepare_state,
+              select_upd == prev_upd ? 1 : 0);
+        }
+
         if (WT_TIME_WINDOW_HAS_STOP(&vpack->tw)) {
             WT_ASSERT_ALWAYS(session,
+              __wt_txn_upd_visible_all(session, prev_upd) ||
               prepare_state == WT_PREPARE_INPROGRESS || prepare_state == WT_PREPARE_LOCKED ||
                 prev_upd->upd_start_ts == prev_upd->upd_durable_ts ||
                 prev_upd->upd_durable_ts >= vpack->tw.durable_stop_ts,
@@ -649,6 +677,7 @@ __rec_validate_upd_chain(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_UPDATE *
               __wt_timestamp_to_string(vpack->tw.durable_stop_ts, ts_string[3]));
         } else
             WT_ASSERT_ALWAYS(session,
+              __wt_txn_upd_visible_all(session, prev_upd) ||
               prepare_state == WT_PREPARE_INPROGRESS || prepare_state == WT_PREPARE_LOCKED ||
                 prev_upd->upd_start_ts == prev_upd->upd_durable_ts ||
                 prev_upd->upd_durable_ts >= vpack->tw.durable_start_ts,

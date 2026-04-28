@@ -464,6 +464,17 @@ __wt_update_obsolete_check(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt, WT_UP
         __wt_evict_page_soon(session, cbt->ref);
     }
 
+    /* BF42097: trace obsolete_check decision for target table. */
+    if (session->dhandle != NULL && session->dhandle->name != NULL &&
+      strstr(session->dhandle->name, "rollback_to_stable47") != NULL) {
+        fprintf(stderr,
+          "BF42097: obsolete_check page=%p count=%u first=%p first_next=%p oldest_id=%" PRIu64
+          " decision=%s\n",
+          (void *)page, count, (void *)first,
+          (first != NULL) ? (void *)first->next : NULL, oldest_id,
+          (first != NULL && first->next != NULL) ? "FREE" : "keep");
+    }
+
     if (first != NULL && first->next != NULL)
         __wt_free_obsolete_updates(session, page, first);
     else if (count > 20) {
