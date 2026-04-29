@@ -2779,6 +2779,14 @@ __wt_open_internal_session(WT_CONNECTION_IMPL *conn, const char *name, bool open
     F_CLR(session, WT_SESSION_CHECKPOINT);
     F_CLR(session, WT_SESSION_CHECKPOINT_WORKER);
 
+    /*
+     * Internal sessions opt in to prefetch explicitly. The auto-on path in __wt_open_session may
+     * have set the flag based on the connection-level prefetch.default config; clear it here so
+     * that the prefetch_check function's gate becomes the explicit opt-in test rather than a
+     * blanket WT_SESSION_INTERNAL rejection.
+     */
+    F_CLR(session, WT_SESSION_PREFETCH_ENABLED);
+
     *sessionp = session;
     return (0);
 }

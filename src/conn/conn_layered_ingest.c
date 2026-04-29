@@ -309,7 +309,8 @@ static int
 __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_ENTRY *entry)
 {
     WT_BTREE *ingest_btree, *stable_btree;
-    WT_CURSOR *ingest_btree_cursor, *ingest_version_cursor, *prepare_cursor, *stable_cursor;
+    WT_CURSOR *ingest_btree_cursor, *ingest_version_cursor, *lookahead_cursor, *prepare_cursor,
+      *stable_cursor;
     WT_CURSOR_BTREE *cbt;
     WT_DECL_ITEM(key);
     WT_DECL_ITEM(tmp_key);
@@ -324,12 +325,17 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
     int cmp;
     char buf[256], buf2[64];
     const char *cfg[] = {WT_CONFIG_BASE(session, WT_SESSION_open_cursor), NULL, NULL, NULL};
-    bool is_prepare_rollback, prepare_resolved, preserve_prepared, prepare_txn_fixed;
+    const char *lookahead_cfg[] = {
+      WT_CONFIG_BASE(session, WT_SESSION_open_cursor), "readonly=true", NULL};
+    bool is_prepare_rollback, lookahead_started, prefetch_was_enabled, prepare_resolved,
+      preserve_prepared, prepare_txn_fixed;
 
-    ingest_version_cursor = prepare_cursor = stable_cursor = NULL;
+    ingest_version_cursor = lookahead_cursor = prepare_cursor = stable_cursor = NULL;
     last_upd = prev_upd = upd = upds = NULL;
+    lookahead_started = false;
     prepare_resolved = prepare_txn_fixed = false;
     preserve_prepared = F_ISSET(S2C(session), WT_CONN_PRESERVE_PREPARED);
+    prefetch_was_enabled = F_ISSET(session, WT_SESSION_PREFETCH_ENABLED);
 
     last_checkpoint_timestamp = __wt_atomic_load_uint64_acquire(
       &S2C(session)->disaggregated_storage.last_checkpoint_timestamp);
@@ -353,6 +359,19 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
     WT_ERR(__wt_scr_alloc(session, 0, &key));
     WT_ERR(__wt_scr_alloc(session, 0, &tmp_key));
     WT_ERR(__wt_scr_alloc(session, 0, &value));
+
+    /*
+     * Open a lookahead cursor on the stable table and enable prefetch on the session. The
+     * lookahead is walked in lockstep with the version cursor on ingest; each forward step
+     * traverses the stable btree via the tree-walk path, which fires __wti_btree_prefetch and
+     * queues nearby leaf pages for asynchronous load. By the time the row_search inside
+     * __layered_move_updates touches a stable leaf, the prefetch threads have either already
+     * loaded it or are loading it concurrently with our work on earlier keys. Drain runs on an
+     * internal session and must opt in to prefetch explicitly; the previous flag value is
+     * restored on cleanup.
+     */
+    F_SET(session, WT_SESSION_PREFETCH_ENABLED);
+    WT_ERR(__wt_open_cursor(session, entry->stable_uri, NULL, lookahead_cfg, &lookahead_cursor));
 
     for (;;) {
         upd = NULL;
@@ -388,6 +407,33 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
             prepare_txn_fixed = false;
             prepare_resolved = false;
             WT_ERR(__wt_buf_set(session, key, tmp_key->data, tmp_key->size));
+
+            /*
+             * Advance the lookahead cursor so it sits at-or-past the new ingest key. The
+             * tree-walk inside cursor->next is what triggers prefetch on stable; once the
+             * lookahead is exhausted (no stable keys remain >= the current ingest key) we close
+             * it and continue without prefetch driving.
+             */
+            while (lookahead_cursor != NULL) {
+                if (lookahead_started) {
+                    WT_ITEM lookahead_key;
+                    int lookahead_cmp;
+                    WT_ERR(lookahead_cursor->get_key(lookahead_cursor, &lookahead_key));
+                    WT_ERR(__wt_compare(
+                      session, stable_btree->collator, &lookahead_key, tmp_key, &lookahead_cmp));
+                    if (lookahead_cmp >= 0)
+                        break;
+                }
+                ret = lookahead_cursor->next(lookahead_cursor);
+                if (ret == WT_NOTFOUND) {
+                    WT_TRET(lookahead_cursor->close(lookahead_cursor));
+                    lookahead_cursor = NULL;
+                    ret = 0;
+                    break;
+                }
+                WT_ERR(ret);
+                lookahead_started = true;
+            }
         }
 
         WT_ERR(ingest_version_cursor->get_value(ingest_version_cursor, &start_txn, &start_ts,
@@ -523,10 +569,14 @@ err:
     __wt_scr_free(session, &value);
     if (ingest_version_cursor != NULL)
         WT_TRET(ingest_version_cursor->close(ingest_version_cursor));
+    if (lookahead_cursor != NULL)
+        WT_TRET(lookahead_cursor->close(lookahead_cursor));
     if (prepare_cursor != NULL)
         WT_TRET(prepare_cursor->close(prepare_cursor));
     if (stable_cursor != NULL)
         WT_TRET(stable_cursor->close(stable_cursor));
+    if (!prefetch_was_enabled)
+        F_CLR(session, WT_SESSION_PREFETCH_ENABLED);
     return (ret);
 }
 

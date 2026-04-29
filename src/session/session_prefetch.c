@@ -16,11 +16,13 @@ bool
 __wt_session_prefetch_check(WT_SESSION_IMPL *session, WT_REF *ref)
 {
     /*
-     * Check if pre-fetching is enabled for this particular session. We don't perform pre-fetching
-     * on internal threads or internal pages (finding the right content to preload based on internal
-     * pages is hard), so check for that too. We also want to pre-fetch sessions that have read at
-     * least one page from disk. The result of this function will subsequently be checked by cursor
-     * logic to determine if pre-fetching will be performed.
+     * Check if pre-fetching is enabled for this particular session. Sessions opt in via
+     * WT_SESSION_PREFETCH_ENABLED, which is auto-set for user sessions when prefetch.default is on
+     * and is cleared for internal sessions at creation; an internal caller that wants prefetch
+     * (e.g. layered ingest drain) sets the flag explicitly. We don't pre-fetch from internal
+     * pages, and we want to pre-fetch sessions that have read at least one page from disk. The
+     * result of this function will subsequently be checked by cursor logic to determine if
+     * pre-fetching will be performed.
      */
     if (!F_ISSET(session, WT_SESSION_PREFETCH_ENABLED)) {
         WT_STAT_CONN_INCR(session, prefetch_skipped);
@@ -34,12 +36,6 @@ __wt_session_prefetch_check(WT_SESSION_IMPL *session, WT_REF *ref)
 
     if (__wt_tsan_suppress_load_uint64(&S2C(session)->prefetch_queue_count) > WT_MAX_PREFETCH_QUEUE)
         return (false);
-
-    if (F_ISSET(session, WT_SESSION_INTERNAL)) {
-        WT_STAT_CONN_INCR(session, prefetch_skipped_internal_session);
-        WT_STAT_CONN_INCR(session, prefetch_skipped);
-        return (false);
-    }
 
     if (F_ISSET(ref, WT_REF_FLAG_INTERNAL)) {
         WT_STAT_CONN_INCR(session, prefetch_skipped_internal_page);
