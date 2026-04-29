@@ -320,6 +320,9 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
     wt_timestamp_t last_checkpoint_timestamp;
     wt_timestamp_t durable_start_ts, durable_stop_ts, start_prepare_ts, start_ts, stop_prepare_ts,
       stop_ts;
+    uint64_t drain_progress_now, drain_progress_start, drain_progress_last_log;
+    uint64_t local_usec_cursor_next, local_usec_move_updates, local_usec_prepare_work;
+    uint64_t local_version_rows, local_keys_flushed, local_updates_chained;
     uint64_t start_prepared_id, start_txn, stop_prepared_id, stop_txn;
     uint8_t flags, location, prepare, type;
     int cmp;
@@ -334,6 +337,8 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
     last_upd = prev_upd = upd = upds = NULL;
     lookahead_started = false;
     prepare_resolved = prepare_txn_fixed = false;
+    local_usec_cursor_next = local_usec_move_updates = local_usec_prepare_work = 0;
+    local_version_rows = local_keys_flushed = local_updates_chained = 0;
     preserve_prepared = F_ISSET(S2C(session), WT_CONN_PRESERVE_PREPARED);
     prefetch_was_enabled = F_ISSET(session, WT_SESSION_PREFETCH_ENABLED);
 
@@ -373,19 +378,62 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
     F_SET(session, WT_SESSION_PREFETCH_ENABLED);
     WT_ERR(__wt_open_cursor(session, entry->stable_uri, NULL, lookahead_cfg, &lookahead_cursor));
 
+    drain_progress_start = drain_progress_last_log = __wt_clock(session);
+    __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
+      "Draining ingest table \"%s\" into stable table \"%s\"", entry->ingest_uri,
+      entry->stable_uri);
+
     for (;;) {
+        drain_progress_now = __wt_clock(session);
+        if (WT_CLOCKDIFF_SEC(drain_progress_now, drain_progress_last_log) >= 10) {
+            __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
+              "Still draining ingest table \"%s\" into stable \"%s\" (%" PRIu64
+              "s elapsed): %" PRIu64 " version rows, %" PRIu64 " keys flushed, %" PRIu64
+              " updates chained; usec: cursor_next=%" PRIu64 " move_updates=%" PRIu64
+              " prepare=%" PRIu64,
+              entry->ingest_uri, entry->stable_uri,
+              WT_CLOCKDIFF_SEC(drain_progress_now, drain_progress_start), local_version_rows,
+              local_keys_flushed, local_updates_chained, local_usec_cursor_next,
+              local_usec_move_updates, local_usec_prepare_work);
+            drain_progress_last_log = drain_progress_now;
+        }
+
         upd = NULL;
-        WT_ERR_NOTFOUND_OK(ingest_version_cursor->next(ingest_version_cursor), true);
+        {
+            uint64_t tn0, tn1, tn_us;
+
+            tn0 = __wt_clock(session);
+            ret = ingest_version_cursor->next(ingest_version_cursor);
+            tn1 = __wt_clock(session);
+            tn_us = WT_CLOCKDIFF_US(tn1, tn0);
+            WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_cursor_next, tn_us);
+            local_usec_cursor_next += tn_us;
+        }
+        if (ret != 0 && ret != WT_NOTFOUND)
+            WT_ERR(ret);
         if (ret == WT_NOTFOUND) {
             if (key->size > 0 && upds != NULL) {
-                WT_WITH_DHANDLE(session, cbt->dhandle,
-                  ret = __layered_move_updates(session, cbt, key, upds, last_upd));
+                uint64_t tm0, tm1, tm_us;
+
+                WT_WITH_DHANDLE(session, cbt->dhandle, {
+                    tm0 = __wt_clock(session);
+                    ret = __layered_move_updates(session, cbt, key, upds, last_upd);
+                    tm1 = __wt_clock(session);
+                });
                 WT_ERR(ret);
+                tm_us = WT_CLOCKDIFF_US(tm1, tm0);
+                WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_move_updates, tm_us);
+                local_usec_move_updates += tm_us;
+                WT_STAT_CONN_INCR(session, layered_drain_ingest_keys_flushed);
+                ++local_keys_flushed;
                 upds = NULL;
             } else
                 ret = 0;
             break;
         }
+
+        WT_STAT_CONN_INCR(session, layered_drain_ingest_version_rows);
+        ++local_version_rows;
 
         WT_ERR(ingest_version_cursor->get_key(ingest_version_cursor, tmp_key));
         WT_ERR(__wt_compare(session, stable_btree->collator, key, tmp_key, &cmp));
@@ -397,9 +445,19 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
             WT_ASSERT(session, key->size == 0 || cmp <= 0);
 
             if (upds != NULL) {
-                WT_WITH_DHANDLE(session, cbt->dhandle,
-                  ret = __layered_move_updates(session, cbt, key, upds, last_upd));
+                uint64_t tm0, tm1, tm_us;
+
+                WT_WITH_DHANDLE(session, cbt->dhandle, {
+                    tm0 = __wt_clock(session);
+                    ret = __layered_move_updates(session, cbt, key, upds, last_upd);
+                    tm1 = __wt_clock(session);
+                });
                 WT_ERR(ret);
+                tm_us = WT_CLOCKDIFF_US(tm1, tm0);
+                WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_move_updates, tm_us);
+                local_usec_move_updates += tm_us;
+                WT_STAT_CONN_INCR(session, layered_drain_ingest_keys_flushed);
+                ++local_keys_flushed;
             }
 
             upds = NULL;
@@ -459,9 +517,17 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
               start_prepare_ts <= last_checkpoint_timestamp) {
                 if (prepare) {
                     if (!prepare_txn_fixed) {
+                        uint64_t tp0, tp1, tp_us;
+
                         WT_ASSERT(session, upds == NULL);
-                        WT_ERR(__layered_fix_prepared_transaction(
-                          session, key, ingest_btree, stable_btree, start_txn));
+                        tp0 = __wt_clock(session);
+                        ret = __layered_fix_prepared_transaction(
+                          session, key, ingest_btree, stable_btree, start_txn);
+                        tp1 = __wt_clock(session);
+                        tp_us = WT_CLOCKDIFF_US(tp1, tp0);
+                        WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_prepare_work, tp_us);
+                        local_usec_prepare_work += tp_us;
+                        WT_ERR(ret);
                         prepare_txn_fixed = true;
                     }
                 } else if (!prepare_resolved) {
@@ -472,21 +538,37 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
                          * timestamp is stored in durable timestamp.
                          */
                         WT_TXN_TIME_POINT txn_time_point;
+                        uint64_t tp0, tp1, tp_us;
+
                         txn_time_point.id = start_ts;
                         txn_time_point.prepared_id = start_prepared_id;
                         txn_time_point.prepare_timestamp = start_prepare_ts;
                         txn_time_point.rollback_timestamp = durable_start_ts;
-                        WT_ERR(__wt_txn_resolve_prepared_op(session, stable_btree, &txn_time_point,
-                          key, WT_RECNO_OOB, false, &prepare_cursor));
+                        tp0 = __wt_clock(session);
+                        ret = __wt_txn_resolve_prepared_op(session, stable_btree, &txn_time_point,
+                          key, WT_RECNO_OOB, false, &prepare_cursor);
+                        tp1 = __wt_clock(session);
+                        tp_us = WT_CLOCKDIFF_US(tp1, tp0);
+                        WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_prepare_work, tp_us);
+                        local_usec_prepare_work += tp_us;
+                        WT_ERR(ret);
                     } else {
                         WT_TXN_TIME_POINT txn_time_point;
+                        uint64_t tp0, tp1, tp_us;
+
                         txn_time_point.id = start_txn;
                         txn_time_point.prepared_id = start_prepared_id;
                         txn_time_point.prepare_timestamp = start_prepare_ts;
                         txn_time_point.commit_timestamp = start_ts;
                         txn_time_point.durable_timestamp = durable_start_ts;
-                        WT_ERR(__wt_txn_resolve_prepared_op(session, stable_btree, &txn_time_point,
-                          key, WT_RECNO_OOB, true, &prepare_cursor));
+                        tp0 = __wt_clock(session);
+                        ret = __wt_txn_resolve_prepared_op(session, stable_btree, &txn_time_point,
+                          key, WT_RECNO_OOB, true, &prepare_cursor);
+                        tp1 = __wt_clock(session);
+                        tp_us = WT_CLOCKDIFF_US(tp1, tp0);
+                        WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_prepare_work, tp_us);
+                        local_usec_prepare_work += tp_us;
+                        WT_ERR(ret);
                     }
                     prepare_resolved = true;
                 }
@@ -539,15 +621,25 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
                 last_upd = upd;
 
                 if (prepare && !prepare_txn_fixed) {
+                    uint64_t tp0, tp1, tp_us;
+
                     WT_ASSERT(session, upds == NULL);
-                    WT_ERR(__layered_fix_prepared_transaction(
-                      session, key, ingest_btree, stable_btree, start_txn));
+                    tp0 = __wt_clock(session);
+                    ret = __layered_fix_prepared_transaction(
+                      session, key, ingest_btree, stable_btree, start_txn);
+                    tp1 = __wt_clock(session);
+                    tp_us = WT_CLOCKDIFF_US(tp1, tp0);
+                    WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_prepare_work, tp_us);
+                    local_usec_prepare_work += tp_us;
+                    WT_ERR(ret);
                     prepare_txn_fixed = true;
                 }
             }
         }
 
         if (upd != NULL) {
+            WT_STAT_CONN_INCR(session, layered_drain_ingest_updates_chained);
+            ++local_updates_chained;
             /* If a prepared update is resolved, it must be the final update to be drained. */
             WT_ASSERT(session, !prepare_resolved);
             if (prev_upd != NULL)
@@ -557,6 +649,21 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
 
             prev_upd = upd;
         }
+    }
+
+    {
+        uint64_t wall, wall_us;
+
+        wall = __wt_clock(session);
+        wall_us = WT_CLOCKDIFF_US(wall, drain_progress_start);
+        WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_total, wall_us);
+        __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
+          "Finished draining ingest table \"%s\" into stable \"%s\": %" PRIu64 " version rows, %" PRIu64
+          " keys flushed, %" PRIu64 " updates chained; usec cursor_next=%" PRIu64
+          " move_updates=%" PRIu64 " prepare=%" PRIu64 " wall=%" PRIu64,
+          entry->ingest_uri, entry->stable_uri, local_version_rows, local_keys_flushed,
+          local_updates_chained, local_usec_cursor_next, local_usec_move_updates,
+          local_usec_prepare_work, wall_us);
     }
 
 err:

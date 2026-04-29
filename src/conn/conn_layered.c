@@ -1258,6 +1258,7 @@ __disagg_step_up(WT_SESSION_IMPL *session)
     WT_CONNECTION_IMPL *conn;
     WT_DECL_RET;
     WT_SESSION_IMPL *internal_session;
+    uint64_t time_start, time_stop;
 
     conn = S2C(session);
 
@@ -1290,7 +1291,12 @@ __disagg_step_up(WT_SESSION_IMPL *session)
      * before draining the ingest tables, so that the updates to the stable tables will be correctly
      * included in the new checkpoint.
      */
+    time_start = __wt_clock(session);
     WT_ERR(__disagg_restart_checkpoint(session));
+    time_stop = __wt_clock(session);
+    __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
+      "Step up phase 'restart checkpoint' completed in %" PRIu64 " seconds",
+      WT_CLOCKDIFF_SEC(time_stop, time_start));
 
     /*
      * We might not need to hold a checkpoint lock below this point, but we will keep it just to be
@@ -1299,12 +1305,22 @@ __disagg_step_up(WT_SESSION_IMPL *session)
      */
 
     /* Create any missing stable tables. */
+    time_start = __wt_clock(session);
     WT_ERR_MSG_CHK(session, __layered_create_missing_stable_tables(internal_session),
       "Failed to create missing stable tables");
+    time_stop = __wt_clock(session);
+    __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
+      "Step up phase 'create missing stable tables' completed in %" PRIu64 " seconds",
+      WT_CLOCKDIFF_SEC(time_stop, time_start));
 
     /* Drain the ingest tables before switching to leader. */
+    time_start = __wt_clock(session);
     WT_ERR_MSG_CHK(session, __wti_layered_drain_ingest_tables(internal_session),
       "Failed to drain ingest tables");
+    time_stop = __wt_clock(session);
+    __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
+      "Step up phase 'drain ingest tables' completed in %" PRIu64 " seconds",
+      WT_CLOCKDIFF_SEC(time_stop, time_start));
 
 err:
     WT_TRET(__wt_session_close_internal(internal_session));

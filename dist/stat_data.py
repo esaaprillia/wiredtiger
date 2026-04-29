@@ -1363,6 +1363,14 @@ conn_dsrc_stats = [
     LayeredStat('layered_curs_search_stable', 'Layered table cursor search operations from the stable btrees'),
     LayeredStat('layered_curs_update', 'Layered table cursor update operations'),
 
+    LayeredStat('layered_drain_ingest_keys_flushed', 'ingest drain: keys copied into stable btree'),
+    LayeredStat('layered_drain_ingest_updates_chained', 'ingest drain: update values chained from ingest cursor rows'),
+    LayeredStat('layered_drain_ingest_usec_cursor_next', 'ingest drain: microseconds spent in ingest version cursor next calls', 'no_scale'),
+    LayeredStat('layered_drain_ingest_usec_move_updates', 'ingest drain: microseconds spent applying updates into stable btree', 'no_scale'),
+    LayeredStat('layered_drain_ingest_usec_prepare_work', 'ingest drain: microseconds spent in prepared transaction fix or resolve', 'no_scale'),
+    LayeredStat('layered_drain_ingest_usec_total', 'ingest drain: microseconds total wall time across ingest drain operations', 'no_scale'),
+    LayeredStat('layered_drain_ingest_version_rows', 'ingest drain: ingest version cursor rows processed'),
+
     LayeredStat('layered_table_manager_checkpoints', 'checkpoints performed on this table by the layered table manager'),
     LayeredStat('layered_table_manager_checkpoints_disagg_pick_up_failed', 'disagg pick up checkpoints failed'),
     LayeredStat('layered_table_manager_checkpoints_disagg_pick_up_succeed', 'disagg pick up checkpoints succeeded'),

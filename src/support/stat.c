@@ -326,6 +326,13 @@ static const char *const __stats_dsrc_desc[] = {
   "layered: how many log applications the layered table manager applied on this tree",
   "layered: how many log applications the layered table manager skipped on this tree",
   "layered: how many previously-applied LSNs the layered table manager skipped on this tree",
+  "layered: ingest drain: ingest version cursor rows processed",
+  "layered: ingest drain: keys copied into stable btree",
+  "layered: ingest drain: microseconds spent applying updates into stable btree",
+  "layered: ingest drain: microseconds spent in ingest version cursor next calls",
+  "layered: ingest drain: microseconds spent in prepared transaction fix or resolve",
+  "layered: ingest drain: microseconds total wall time across ingest drain operations",
+  "layered: ingest drain: update values chained from ingest cursor rows",
   "reconciliation: VLCS pages explicitly reconciled as empty",
   "reconciliation: approximate byte size of timestamps in pages written",
   "reconciliation: approximate byte size of transaction IDs in pages written",
@@ -776,6 +783,13 @@ __wt_stat_dsrc_clear_single(WT_DSRC_STATS *stats)
     stats->layered_table_manager_logops_applied = 0;
     stats->layered_table_manager_logops_skipped = 0;
     stats->layered_table_manager_skip_lsn = 0;
+    stats->layered_drain_ingest_version_rows = 0;
+    stats->layered_drain_ingest_keys_flushed = 0;
+    stats->layered_drain_ingest_usec_move_updates = 0;
+    stats->layered_drain_ingest_usec_cursor_next = 0;
+    stats->layered_drain_ingest_usec_prepare_work = 0;
+    stats->layered_drain_ingest_usec_total = 0;
+    stats->layered_drain_ingest_updates_chained = 0;
     stats->rec_vlcs_emptied_pages = 0;
     stats->rec_time_window_bytes_ts = 0;
     stats->rec_time_window_bytes_txn = 0;
@@ -1228,6 +1242,13 @@ __wt_stat_dsrc_aggregate_single(WT_DSRC_STATS *from, WT_DSRC_STATS *to)
     to->layered_table_manager_logops_applied += from->layered_table_manager_logops_applied;
     to->layered_table_manager_logops_skipped += from->layered_table_manager_logops_skipped;
     to->layered_table_manager_skip_lsn += from->layered_table_manager_skip_lsn;
+    to->layered_drain_ingest_version_rows += from->layered_drain_ingest_version_rows;
+    to->layered_drain_ingest_keys_flushed += from->layered_drain_ingest_keys_flushed;
+    to->layered_drain_ingest_usec_move_updates += from->layered_drain_ingest_usec_move_updates;
+    to->layered_drain_ingest_usec_cursor_next += from->layered_drain_ingest_usec_cursor_next;
+    to->layered_drain_ingest_usec_prepare_work += from->layered_drain_ingest_usec_prepare_work;
+    to->layered_drain_ingest_usec_total += from->layered_drain_ingest_usec_total;
+    to->layered_drain_ingest_updates_chained += from->layered_drain_ingest_updates_chained;
     to->rec_vlcs_emptied_pages += from->rec_vlcs_emptied_pages;
     to->rec_time_window_bytes_ts += from->rec_time_window_bytes_ts;
     to->rec_time_window_bytes_txn += from->rec_time_window_bytes_txn;
@@ -1722,6 +1743,19 @@ __wt_stat_dsrc_aggregate(WT_DSRC_STATS **from, WT_DSRC_STATS *to)
     to->layered_table_manager_logops_skipped +=
       WT_STAT_DSRC_READ(from, layered_table_manager_logops_skipped);
     to->layered_table_manager_skip_lsn += WT_STAT_DSRC_READ(from, layered_table_manager_skip_lsn);
+    to->layered_drain_ingest_version_rows +=
+      WT_STAT_DSRC_READ(from, layered_drain_ingest_version_rows);
+    to->layered_drain_ingest_keys_flushed +=
+      WT_STAT_DSRC_READ(from, layered_drain_ingest_keys_flushed);
+    to->layered_drain_ingest_usec_move_updates +=
+      WT_STAT_DSRC_READ(from, layered_drain_ingest_usec_move_updates);
+    to->layered_drain_ingest_usec_cursor_next +=
+      WT_STAT_DSRC_READ(from, layered_drain_ingest_usec_cursor_next);
+    to->layered_drain_ingest_usec_prepare_work +=
+      WT_STAT_DSRC_READ(from, layered_drain_ingest_usec_prepare_work);
+    to->layered_drain_ingest_usec_total += WT_STAT_DSRC_READ(from, layered_drain_ingest_usec_total);
+    to->layered_drain_ingest_updates_chained +=
+      WT_STAT_DSRC_READ(from, layered_drain_ingest_updates_chained);
     to->rec_vlcs_emptied_pages += WT_STAT_DSRC_READ(from, rec_vlcs_emptied_pages);
     to->rec_time_window_bytes_ts += WT_STAT_DSRC_READ(from, rec_time_window_bytes_ts);
     to->rec_time_window_bytes_txn += WT_STAT_DSRC_READ(from, rec_time_window_bytes_txn);
@@ -2476,6 +2510,13 @@ static const char *const __stats_connection_desc[] = {
   "layered: how many log applications the layered table manager applied on this tree",
   "layered: how many log applications the layered table manager skipped on this tree",
   "layered: how many previously-applied LSNs the layered table manager skipped on this tree",
+  "layered: ingest drain: ingest version cursor rows processed",
+  "layered: ingest drain: keys copied into stable btree",
+  "layered: ingest drain: microseconds spent applying updates into stable btree",
+  "layered: ingest drain: microseconds spent in ingest version cursor next calls",
+  "layered: ingest drain: microseconds spent in prepared transaction fix or resolve",
+  "layered: ingest drain: microseconds total wall time across ingest drain operations",
+  "layered: ingest drain: update values chained from ingest cursor rows",
   "layered: number of checkpoints picked up by a follower",
   "layered: the number of tables the layered table manager has open",
   "live-restore: number of bytes copied from the source to the destination",
@@ -3517,6 +3558,13 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->layered_table_manager_logops_applied = 0;
     stats->layered_table_manager_logops_skipped = 0;
     stats->layered_table_manager_skip_lsn = 0;
+    stats->layered_drain_ingest_version_rows = 0;
+    stats->layered_drain_ingest_keys_flushed = 0;
+    stats->layered_drain_ingest_usec_move_updates = 0;
+    stats->layered_drain_ingest_usec_cursor_next = 0;
+    stats->layered_drain_ingest_usec_prepare_work = 0;
+    stats->layered_drain_ingest_usec_total = 0;
+    stats->layered_drain_ingest_updates_chained = 0;
     stats->layered_table_manager_checkpoints_disagg_pick_up_follower = 0;
     stats->layered_table_manager_tables = 0;
     stats->live_restore_bytes_copied = 0;
@@ -4675,6 +4723,19 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
     to->layered_table_manager_logops_skipped +=
       WT_STAT_CONN_READ(from, layered_table_manager_logops_skipped);
     to->layered_table_manager_skip_lsn += WT_STAT_CONN_READ(from, layered_table_manager_skip_lsn);
+    to->layered_drain_ingest_version_rows +=
+      WT_STAT_CONN_READ(from, layered_drain_ingest_version_rows);
+    to->layered_drain_ingest_keys_flushed +=
+      WT_STAT_CONN_READ(from, layered_drain_ingest_keys_flushed);
+    to->layered_drain_ingest_usec_move_updates +=
+      WT_STAT_CONN_READ(from, layered_drain_ingest_usec_move_updates);
+    to->layered_drain_ingest_usec_cursor_next +=
+      WT_STAT_CONN_READ(from, layered_drain_ingest_usec_cursor_next);
+    to->layered_drain_ingest_usec_prepare_work +=
+      WT_STAT_CONN_READ(from, layered_drain_ingest_usec_prepare_work);
+    to->layered_drain_ingest_usec_total += WT_STAT_CONN_READ(from, layered_drain_ingest_usec_total);
+    to->layered_drain_ingest_updates_chained +=
+      WT_STAT_CONN_READ(from, layered_drain_ingest_updates_chained);
     to->layered_table_manager_checkpoints_disagg_pick_up_follower +=
       WT_STAT_CONN_READ(from, layered_table_manager_checkpoints_disagg_pick_up_follower);
     to->layered_table_manager_tables += WT_STAT_CONN_READ(from, layered_table_manager_tables);

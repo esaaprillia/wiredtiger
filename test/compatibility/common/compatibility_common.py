@@ -90,7 +90,13 @@ def prepare_branch(branch, config):
     if branch != 'this':
         if os.path.exists(path):
             print(f'Branch {branch} is already cloned')
-            system(f'git -C "{path}" pull')
+            # Allow callers to pin a branch to a specific commit by setting SKIP_GIT_PULL=1.
+            # This is useful when the worktree has been manually checked out to a pre-fix
+            # or otherwise specific commit that should not be updated.
+            if os.environ.get('SKIP_GIT_PULL') != '1':
+                system(f'git -C "{path}" pull')
+            else:
+                print(f'SKIP_GIT_PULL=1: skipping git pull for {branch}')
         else:
             source = 'https://github.com/wiredtiger/wiredtiger.git'
             print(f'Cloning branch {branch}')
