@@ -475,10 +475,19 @@ struct __wti_update_select {
       WT_REC_RESULT_SINGLE_PAGE((session), (r))
 /*
  * Macro to check if an update's transaction ID and timestamp is obsolete and can be pruned.
+ *
+ * In addition to the prune timestamp check (which is based on stable checkpoints no longer in
+ * use), we also require that the update's timestamp is strictly older than the system's pinned
+ * read timestamp. This prevents pruning data that active timestamp-based readers still need,
+ * even when the prune timestamp (derived from checkpoint cursor usage) says it is eligible.
+ *
+ * If no pinned timestamp exists (rec_start_pinned_ts == WT_TS_NONE), there are no
+ * timestamp-based readers, so we allow pruning based on the prune timestamp alone.
  */
-#define WT_REC_CAN_PRUNE_UPD(txnid, timestamp, r)                                    \
-    ((r)->rec_prune_timestamp != WT_TS_NONE && (txnid) < (r)->rec_start_oldest_id && \
-      (timestamp) <= r->rec_prune_timestamp)
+#define WT_REC_CAN_PRUNE_UPD(txnid, timestamp, r)                                         \
+    ((r)->rec_prune_timestamp != WT_TS_NONE && (txnid) < (r)->rec_start_oldest_id &&      \
+      (timestamp) <= (r)->rec_prune_timestamp &&                                           \
+      ((r)->rec_start_pinned_ts == WT_TS_NONE || (timestamp) < (r)->rec_start_pinned_ts))
 
 #define WT_REC_HAS_ON_DISK(vpack) (vpack != NULL && vpack->type != WT_CELL_DEL)
 /* DO NOT EDIT: automatically built by prototypes.py: BEGIN */
