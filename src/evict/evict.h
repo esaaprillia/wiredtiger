@@ -56,6 +56,7 @@ struct __wt_evict {
      * Eviction threshold percentages use double type to allow for specifying percentages less than
      * one.
      */
+    bool eviction_dirty_index_enabled;         /* Per-btree dirty-index ring + drain enabled */
     wt_shared double eviction_dirty_target;    /* Percent to allow dirty */
     wt_shared double eviction_dirty_trigger;   /* Percent to trigger dirty eviction */
     double eviction_trigger;                   /* Percent to trigger eviction */
