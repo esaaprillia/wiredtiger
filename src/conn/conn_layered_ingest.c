@@ -302,6 +302,103 @@ __layered_fix_prepared_transaction(WT_SESSION_IMPL *session, WT_ITEM *key, WT_BT
 }
 
 /*
+ * Cookie passed to the cache-warming worker thread spawned alongside drain.
+ */
+struct __wt_drain_warm_cookie {
+    WT_SESSION_IMPL *session; /* Internal session owned by the warm thread for the duration. */
+    const char *stable_uri;
+    uint64_t usec; /* Output: wall time the walk took. */
+    int ret;       /* Output: cursor open/walk error, if any. */
+};
+
+/*
+ * __layered_drain_warm_skip --
+ *     Tree-walk skip callback used by the warm thread. For leaf refs that are on disk, queue
+ *     them for asynchronous prefetch and tell the walker to skip the synchronous page load —
+ *     the prefetch threads will do the I/O. For internal refs, return skip=false so the walker
+ *     descends into them; that's how we discover the leaves below. The result is a tree walk
+ *     that touches only internal pages (small, mostly cached) and dispatches all leaf I/O to
+ *     the prefetch worker pool. Errors from queue_push are non-fatal: EBUSY (queue full) just
+ *     drops this leaf from prefetching; drain may have to load it cold but correctness is
+ *     unaffected.
+ */
+static int
+__layered_drain_warm_skip(WT_SESSION_IMPL *session, WT_REF *ref, void *cookie, bool visible_all,
+  bool *skipp)
+{
+    WT_DECL_RET;
+
+    WT_UNUSED(cookie);
+    WT_UNUSED(visible_all);
+
+    if (F_ISSET(ref, WT_REF_FLAG_LEAF)) {
+        if (WT_REF_GET_STATE(ref) == WT_REF_DISK && ref->page_del == NULL &&
+          !F_ISSET_ATOMIC_8(ref, WT_REF_FLAG_PREFETCH)) {
+            ret = __wt_conn_prefetch_queue_push(session, ref);
+            if (ret != 0 && ret != EBUSY)
+                return (ret);
+        }
+        *skipp = true;
+    } else
+        *skipp = false;
+    return (0);
+}
+
+/*
+ * __layered_drain_warm_thread --
+ *     Walk the stable btree at internal-page granularity, queueing every leaf for asynchronous
+ *     prefetch by the connection's prefetch worker pool. The walker thread itself never
+ *     page-faults on a leaf: the skip callback diverts each leaf to the queue and returns
+ *     skip=true so __tree_walk_internal moves on without calling __wt_page_swap. This converts
+ *     the warming walk from "sequential per-leaf cursor advance" into "metadata-only descent
+ *     plus queue-push", which is CPU-bound and fast — leaf I/O fans out across the prefetch
+ *     threads in parallel with drain.
+ *
+ *     Runs on its own session because WT sessions are not designed to be touched concurrently
+ *     from multiple threads. Errors here are non-fatal for drain correctness — a failed warming
+ *     just means drain runs cold — so the caller logs and continues rather than propagating.
+ */
+static WT_THREAD_RET
+__layered_drain_warm_thread(void *arg)
+{
+    WT_DECL_RET;
+    WT_REF *ref;
+    WT_SESSION_IMPL *session;
+    struct __wt_drain_warm_cookie *cookie;
+    uint64_t t0, t1;
+    bool dhandle_acquired;
+
+    cookie = arg;
+    session = cookie->session;
+    dhandle_acquired = false;
+
+    F_SET(session, WT_SESSION_PREFETCH_ENABLED);
+
+    if ((ret = __wt_session_get_dhandle(session, cookie->stable_uri, NULL, NULL, 0)) != 0)
+        goto done;
+    dhandle_acquired = true;
+
+    t0 = __wt_clock(session);
+
+    ref = NULL;
+    while ((ret = __wt_tree_walk_custom_skip(
+              session, &ref, __layered_drain_warm_skip, NULL, 0)) == 0 &&
+      ref != NULL)
+        ;
+    if (ret == WT_NOTFOUND)
+        ret = 0;
+
+    t1 = __wt_clock(session);
+    cookie->usec = WT_CLOCKDIFF_US(t1, t0);
+
+done:
+    if (dhandle_acquired)
+        WT_TRET(__wt_session_release_dhandle(session));
+    cookie->ret = ret;
+    return (WT_THREAD_RET_VALUE);
+}
+
+/*
  * __layered_copy_ingest_table --
  *     Moving all the data from a single ingest table to the corresponding stable table
  */
@@ -309,38 +406,42 @@ static int
 __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_ENTRY *entry)
 {
     WT_BTREE *ingest_btree, *stable_btree;
-    WT_CURSOR *ingest_btree_cursor, *ingest_version_cursor, *lookahead_cursor, *prepare_cursor,
-      *stable_cursor;
+    WT_CURSOR *ingest_btree_cursor, *ingest_version_cursor, *prepare_cursor, *stable_cursor;
     WT_CURSOR_BTREE *cbt;
     WT_DECL_ITEM(key);
     WT_DECL_ITEM(tmp_key);
     WT_DECL_ITEM(value);
     WT_DECL_RET;
+    WT_SESSION_IMPL *warm_session;
     WT_UPDATE *last_upd, *prev_upd, *upd, *upds;
+    struct __wt_drain_warm_cookie warm_cookie;
+    wt_thread_t warm_tid;
     wt_timestamp_t last_checkpoint_timestamp;
     wt_timestamp_t durable_start_ts, durable_stop_ts, start_prepare_ts, start_ts, stop_prepare_ts,
       stop_ts;
     uint64_t drain_progress_now, drain_progress_start, drain_progress_last_log;
-    uint64_t local_usec_cursor_next, local_usec_move_updates, local_usec_prepare_work;
+    uint64_t local_usec_cursor_next, local_usec_lookahead, local_usec_move_updates,
+      local_usec_prepare_work;
     uint64_t local_version_rows, local_keys_flushed, local_updates_chained;
     uint64_t start_prepared_id, start_txn, stop_prepared_id, stop_txn;
     uint8_t flags, location, prepare, type;
     int cmp;
     char buf[256], buf2[64];
     const char *cfg[] = {WT_CONFIG_BASE(session, WT_SESSION_open_cursor), NULL, NULL, NULL};
-    const char *lookahead_cfg[] = {
-      WT_CONFIG_BASE(session, WT_SESSION_open_cursor), "readonly=true", NULL};
-    bool is_prepare_rollback, lookahead_started, prefetch_was_enabled, prepare_resolved,
-      preserve_prepared, prepare_txn_fixed;
+    bool is_prepare_rollback, prepare_resolved, preserve_prepared, prepare_txn_fixed,
+      warm_started;
 
-    ingest_version_cursor = lookahead_cursor = prepare_cursor = stable_cursor = NULL;
+    ingest_version_cursor = prepare_cursor = stable_cursor = NULL;
+    warm_session = NULL;
+    warm_started = false;
+    WT_CLEAR(warm_cookie);
+    WT_CLEAR(warm_tid);
     last_upd = prev_upd = upd = upds = NULL;
-    lookahead_started = false;
     prepare_resolved = prepare_txn_fixed = false;
-    local_usec_cursor_next = local_usec_move_updates = local_usec_prepare_work = 0;
+    local_usec_cursor_next = local_usec_lookahead = local_usec_move_updates =
+      local_usec_prepare_work = 0;
     local_version_rows = local_keys_flushed = local_updates_chained = 0;
     preserve_prepared = F_ISSET(S2C(session), WT_CONN_PRESERVE_PREPARED);
-    prefetch_was_enabled = F_ISSET(session, WT_SESSION_PREFETCH_ENABLED);
 
     last_checkpoint_timestamp = __wt_atomic_load_uint64_acquire(
       &S2C(session)->disaggregated_storage.last_checkpoint_timestamp);
@@ -366,17 +467,36 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
     WT_ERR(__wt_scr_alloc(session, 0, &value));
 
     /*
-     * Open a lookahead cursor on the stable table and enable prefetch on the session. The
-     * lookahead is walked in lockstep with the version cursor on ingest; each forward step
-     * traverses the stable btree via the tree-walk path, which fires __wti_btree_prefetch and
-     * queues nearby leaf pages for asynchronous load. By the time the row_search inside
-     * __layered_move_updates touches a stable leaf, the prefetch threads have either already
-     * loaded it or are loading it concurrently with our work on earlier keys. Drain runs on an
-     * internal session and must opt in to prefetch explicitly; the previous flag value is
-     * restored on cleanup.
+     * Spawn a worker thread to pre-warm the stable table cache by walking it end-to-end with
+     * prefetch enabled. The tree-walk inside cursor->next fires __wti_btree_prefetch, which
+     * queues nearby leaf pages for asynchronous load by the prefetch threads. By the time the
+     * row_search calls inside __layered_move_updates touch stable leaves, they hit warm cache.
+     * Running the walk concurrently with drain on a separate thread overlaps the warming wall
+     * time with drain's own work — total time is max(warm, drain) rather than warm + drain. The
+     * warm thread runs on its own internal session both because WT sessions are not designed to
+     * be touched concurrently from multiple threads and because the session's prefetch flag and
+     * cursor state must not collide with the drain session.
+     *
+     * Failures in the warm thread are non-fatal for drain correctness — a failed warming just
+     * means drain runs cold — so we log them on join and otherwise continue.
+     *
+     * HACK: scope the warming to MongoDB index tables only. Indexes have small keys, dense
+     * leaves, and predictable sequential access patterns, so prefetch is cleanly profitable.
+     * Collections have larger values and sparser leaves where prefetch can cause cache thrash on
+     * cold step-ups. Detecting via the URI substring "index-" matches MongoDB's naming
+     * convention (file:index-<id>-<hash>.wt_stable) and skips collection-* tables. This is a
+     * layering violation; a proper fix would be a per-table config flag set by the layered
+     * table create path, but the URI heuristic is contained and correctness-safe.
      */
-    F_SET(session, WT_SESSION_PREFETCH_ENABLED);
-    WT_ERR(__wt_open_cursor(session, entry->stable_uri, NULL, lookahead_cfg, &lookahead_cursor));
+    if (entry->stable_uri != NULL && strstr(entry->stable_uri, "index-") != NULL) {
+        WT_ERR(
+          __wt_open_internal_session(S2C(session), "drain-warm", false, 0, 0, &warm_session));
+        warm_cookie.session = warm_session;
+        warm_cookie.stable_uri = entry->stable_uri;
+        WT_ERR(__wt_thread_create(session, &warm_tid, __layered_drain_warm_thread, &warm_cookie));
+        warm_started = true;
+        WT_STAT_CONN_INCR(session, layered_drain_ingest_prefetch_active);
+    }
 
     drain_progress_start = drain_progress_last_log = __wt_clock(session);
     __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
@@ -389,31 +509,30 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
             __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
               "Still draining ingest table \"%s\" into stable \"%s\" (%" PRIu64
               "s elapsed): %" PRIu64 " version rows, %" PRIu64 " keys flushed, %" PRIu64
-              " updates chained; usec: cursor_next=%" PRIu64 " move_updates=%" PRIu64
-              " prepare=%" PRIu64,
+              " updates chained; ms: cursor_next=%" PRIu64 " lookahead=%" PRIu64
+              " move_updates=%" PRIu64 " prepare=%" PRIu64,
               entry->ingest_uri, entry->stable_uri,
               WT_CLOCKDIFF_SEC(drain_progress_now, drain_progress_start), local_version_rows,
-              local_keys_flushed, local_updates_chained, local_usec_cursor_next,
-              local_usec_move_updates, local_usec_prepare_work);
+              local_keys_flushed, local_updates_chained, local_usec_cursor_next / 1000,
+              local_usec_lookahead / 1000, local_usec_move_updates / 1000,
+              local_usec_prepare_work / 1000);
             drain_progress_last_log = drain_progress_now;
         }
 
         upd = NULL;
         {
-            uint64_t tn0, tn1, tn_us;
+            uint64_t tn0, tn1;
 
             tn0 = __wt_clock(session);
             ret = ingest_version_cursor->next(ingest_version_cursor);
             tn1 = __wt_clock(session);
-            tn_us = WT_CLOCKDIFF_US(tn1, tn0);
-            WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_cursor_next, tn_us);
-            local_usec_cursor_next += tn_us;
+            local_usec_cursor_next += WT_CLOCKDIFF_US(tn1, tn0);
         }
         if (ret != 0 && ret != WT_NOTFOUND)
             WT_ERR(ret);
         if (ret == WT_NOTFOUND) {
             if (key->size > 0 && upds != NULL) {
-                uint64_t tm0, tm1, tm_us;
+                uint64_t tm0, tm1;
 
                 WT_WITH_DHANDLE(session, cbt->dhandle, {
                     tm0 = __wt_clock(session);
@@ -421,10 +540,7 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
                     tm1 = __wt_clock(session);
                 });
                 WT_ERR(ret);
-                tm_us = WT_CLOCKDIFF_US(tm1, tm0);
-                WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_move_updates, tm_us);
-                local_usec_move_updates += tm_us;
-                WT_STAT_CONN_INCR(session, layered_drain_ingest_keys_flushed);
+                local_usec_move_updates += WT_CLOCKDIFF_US(tm1, tm0);
                 ++local_keys_flushed;
                 upds = NULL;
             } else
@@ -432,7 +548,6 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
             break;
         }
 
-        WT_STAT_CONN_INCR(session, layered_drain_ingest_version_rows);
         ++local_version_rows;
 
         WT_ERR(ingest_version_cursor->get_key(ingest_version_cursor, tmp_key));
@@ -445,7 +560,7 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
             WT_ASSERT(session, key->size == 0 || cmp <= 0);
 
             if (upds != NULL) {
-                uint64_t tm0, tm1, tm_us;
+                uint64_t tm0, tm1;
 
                 WT_WITH_DHANDLE(session, cbt->dhandle, {
                     tm0 = __wt_clock(session);
@@ -453,10 +568,7 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
                     tm1 = __wt_clock(session);
                 });
                 WT_ERR(ret);
-                tm_us = WT_CLOCKDIFF_US(tm1, tm0);
-                WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_move_updates, tm_us);
-                local_usec_move_updates += tm_us;
-                WT_STAT_CONN_INCR(session, layered_drain_ingest_keys_flushed);
+                local_usec_move_updates += WT_CLOCKDIFF_US(tm1, tm0);
                 ++local_keys_flushed;
             }
 
@@ -465,33 +577,6 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
             prepare_txn_fixed = false;
             prepare_resolved = false;
             WT_ERR(__wt_buf_set(session, key, tmp_key->data, tmp_key->size));
-
-            /*
-             * Advance the lookahead cursor so it sits at-or-past the new ingest key. The
-             * tree-walk inside cursor->next is what triggers prefetch on stable; once the
-             * lookahead is exhausted (no stable keys remain >= the current ingest key) we close
-             * it and continue without prefetch driving.
-             */
-            while (lookahead_cursor != NULL) {
-                if (lookahead_started) {
-                    WT_ITEM lookahead_key;
-                    int lookahead_cmp;
-                    WT_ERR(lookahead_cursor->get_key(lookahead_cursor, &lookahead_key));
-                    WT_ERR(__wt_compare(
-                      session, stable_btree->collator, &lookahead_key, tmp_key, &lookahead_cmp));
-                    if (lookahead_cmp >= 0)
-                        break;
-                }
-                ret = lookahead_cursor->next(lookahead_cursor);
-                if (ret == WT_NOTFOUND) {
-                    WT_TRET(lookahead_cursor->close(lookahead_cursor));
-                    lookahead_cursor = NULL;
-                    ret = 0;
-                    break;
-                }
-                WT_ERR(ret);
-                lookahead_started = true;
-            }
         }
 
         WT_ERR(ingest_version_cursor->get_value(ingest_version_cursor, &start_txn, &start_ts,
@@ -517,16 +602,14 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
               start_prepare_ts <= last_checkpoint_timestamp) {
                 if (prepare) {
                     if (!prepare_txn_fixed) {
-                        uint64_t tp0, tp1, tp_us;
+                        uint64_t tp0, tp1;
 
                         WT_ASSERT(session, upds == NULL);
                         tp0 = __wt_clock(session);
                         ret = __layered_fix_prepared_transaction(
                           session, key, ingest_btree, stable_btree, start_txn);
                         tp1 = __wt_clock(session);
-                        tp_us = WT_CLOCKDIFF_US(tp1, tp0);
-                        WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_prepare_work, tp_us);
-                        local_usec_prepare_work += tp_us;
+                        local_usec_prepare_work += WT_CLOCKDIFF_US(tp1, tp0);
                         WT_ERR(ret);
                         prepare_txn_fixed = true;
                     }
@@ -538,7 +621,7 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
                          * timestamp is stored in durable timestamp.
                          */
                         WT_TXN_TIME_POINT txn_time_point;
-                        uint64_t tp0, tp1, tp_us;
+                        uint64_t tp0, tp1;
 
                         txn_time_point.id = start_ts;
                         txn_time_point.prepared_id = start_prepared_id;
@@ -548,13 +631,11 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
                         ret = __wt_txn_resolve_prepared_op(session, stable_btree, &txn_time_point,
                           key, WT_RECNO_OOB, false, &prepare_cursor);
                         tp1 = __wt_clock(session);
-                        tp_us = WT_CLOCKDIFF_US(tp1, tp0);
-                        WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_prepare_work, tp_us);
-                        local_usec_prepare_work += tp_us;
+                        local_usec_prepare_work += WT_CLOCKDIFF_US(tp1, tp0);
                         WT_ERR(ret);
                     } else {
                         WT_TXN_TIME_POINT txn_time_point;
-                        uint64_t tp0, tp1, tp_us;
+                        uint64_t tp0, tp1;
 
                         txn_time_point.id = start_txn;
                         txn_time_point.prepared_id = start_prepared_id;
@@ -565,9 +646,7 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
                         ret = __wt_txn_resolve_prepared_op(session, stable_btree, &txn_time_point,
                           key, WT_RECNO_OOB, true, &prepare_cursor);
                         tp1 = __wt_clock(session);
-                        tp_us = WT_CLOCKDIFF_US(tp1, tp0);
-                        WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_prepare_work, tp_us);
-                        local_usec_prepare_work += tp_us;
+                        local_usec_prepare_work += WT_CLOCKDIFF_US(tp1, tp0);
                         WT_ERR(ret);
                     }
                     prepare_resolved = true;
@@ -621,16 +700,14 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
                 last_upd = upd;
 
                 if (prepare && !prepare_txn_fixed) {
-                    uint64_t tp0, tp1, tp_us;
+                    uint64_t tp0, tp1;
 
                     WT_ASSERT(session, upds == NULL);
                     tp0 = __wt_clock(session);
                     ret = __layered_fix_prepared_transaction(
                       session, key, ingest_btree, stable_btree, start_txn);
                     tp1 = __wt_clock(session);
-                    tp_us = WT_CLOCKDIFF_US(tp1, tp0);
-                    WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_prepare_work, tp_us);
-                    local_usec_prepare_work += tp_us;
+                    local_usec_prepare_work += WT_CLOCKDIFF_US(tp1, tp0);
                     WT_ERR(ret);
                     prepare_txn_fixed = true;
                 }
@@ -638,7 +715,6 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
         }
 
         if (upd != NULL) {
-            WT_STAT_CONN_INCR(session, layered_drain_ingest_updates_chained);
             ++local_updates_chained;
             /* If a prepared update is resolved, it must be the final update to be drained. */
             WT_ASSERT(session, !prepare_resolved);
@@ -652,18 +728,35 @@ __layered_copy_ingest_table(WT_SESSION_IMPL *session, WT_LAYERED_TABLE_MANAGER_E
     }
 
     {
-        uint64_t wall, wall_us;
+        uint64_t wall_us;
 
-        wall = __wt_clock(session);
-        wall_us = WT_CLOCKDIFF_US(wall, drain_progress_start);
-        WT_STAT_CONN_INCRV(session, layered_drain_ingest_usec_total, wall_us);
+        wall_us = WT_CLOCKDIFF_US(__wt_clock(session), drain_progress_start);
+
+        /*
+         * Flush per-table accumulators into connection stats once at end of drain. We accumulate
+         * locally in microseconds for precision (sub-millisecond per-call ops would round to zero
+         * if incremented in milliseconds) and convert here before bumping the millisecond stats.
+         */
+        WT_STAT_CONN_INCRV(
+          session, layered_drain_ingest_msec_cursor_next, local_usec_cursor_next / 1000);
+        WT_STAT_CONN_INCRV(
+          session, layered_drain_ingest_msec_lookahead, local_usec_lookahead / 1000);
+        WT_STAT_CONN_INCRV(
+          session, layered_drain_ingest_msec_move_updates, local_usec_move_updates / 1000);
+        WT_STAT_CONN_INCRV(
+          session, layered_drain_ingest_msec_prepare_work, local_usec_prepare_work / 1000);
+        WT_STAT_CONN_INCRV(session, layered_drain_ingest_msec_total, wall_us / 1000);
+        WT_STAT_CONN_INCRV(session, layered_drain_ingest_keys_flushed, local_keys_flushed);
+        WT_STAT_CONN_INCRV(session, layered_drain_ingest_updates_chained, local_updates_chained);
+        WT_STAT_CONN_INCRV(session, layered_drain_ingest_version_rows, local_version_rows);
+
         __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
           "Finished draining ingest table \"%s\" into stable \"%s\": %" PRIu64 " version rows, %" PRIu64
-          " keys flushed, %" PRIu64 " updates chained; usec cursor_next=%" PRIu64
-          " move_updates=%" PRIu64 " prepare=%" PRIu64 " wall=%" PRIu64,
+          " keys flushed, %" PRIu64 " updates chained; ms cursor_next=%" PRIu64
+          " lookahead=%" PRIu64 " move_updates=%" PRIu64 " prepare=%" PRIu64 " wall=%" PRIu64,
           entry->ingest_uri, entry->stable_uri, local_version_rows, local_keys_flushed,
-          local_updates_chained, local_usec_cursor_next, local_usec_move_updates,
-          local_usec_prepare_work, wall_us);
+          local_updates_chained, local_usec_cursor_next / 1000, local_usec_lookahead / 1000,
+          local_usec_move_updates / 1000, local_usec_prepare_work / 1000, wall_us / 1000);
     }
 
 err:
@@ -674,16 +767,27 @@ err:
     __wt_scr_free(session, &key);
     __wt_scr_free(session, &tmp_key);
     __wt_scr_free(session, &value);
+    /*
+     * Join the warming thread before closing cursors and the warm session — the warm thread
+     * holds a cursor on the stable dhandle and references the warm session. Warming errors are
+     * non-fatal for drain: log them and proceed.
+     */
+    if (warm_started) {
+        WT_TRET(__wt_thread_join(session, &warm_tid));
+        if (warm_cookie.ret != 0)
+            __wt_verbose_level(session, WT_VERB_LAYERED, WT_VERBOSE_WARNING,
+              "Drain cache-warming thread failed for \"%s\": %d", entry->stable_uri,
+              warm_cookie.ret);
+        local_usec_lookahead = warm_cookie.usec;
+    }
     if (ingest_version_cursor != NULL)
         WT_TRET(ingest_version_cursor->close(ingest_version_cursor));
-    if (lookahead_cursor != NULL)
-        WT_TRET(lookahead_cursor->close(lookahead_cursor));
     if (prepare_cursor != NULL)
         WT_TRET(prepare_cursor->close(prepare_cursor));
     if (stable_cursor != NULL)
         WT_TRET(stable_cursor->close(stable_cursor));
-    if (!prefetch_was_enabled)
-        F_CLR(session, WT_SESSION_PREFETCH_ENABLED);
+    if (warm_session != NULL)
+        WT_TRET(__wt_session_close_internal(warm_session));
     return (ret);
 }
 
@@ -711,8 +815,20 @@ __layered_drain_worker_run(WT_SESSION_IMPL *session, WT_THREAD *ctx)
     WT_ERR_MSG_CHK(session, __layered_copy_ingest_table(session, work_item->entry),
       "Failed to copy ingest table \"%s\" to stable table \"%s\"", work_item->entry->ingest_uri,
       work_item->entry->stable_uri);
-    WT_ERR_MSG_CHK(session, __layered_clear_ingest_table(session, work_item->entry->ingest_uri),
-      "Failed to clear ingest table \"%s\"", work_item->entry->ingest_uri);
+    {
+        uint64_t tt0, tt1, tt_us;
+
+        tt0 = __wt_clock(session);
+        ret = __layered_clear_ingest_table(session, work_item->entry->ingest_uri);
+        tt1 = __wt_clock(session);
+        tt_us = WT_CLOCKDIFF_US(tt1, tt0);
+        WT_STAT_CONN_INCRV(session, layered_drain_ingest_msec_truncate, tt_us / 1000);
+        __wt_verbose_info(session, WT_VERB_DISAGGREGATED_STORAGE,
+          "Truncated ingest table \"%s\" in %" PRIu64 " ms", work_item->entry->ingest_uri,
+          tt_us / 1000);
+        WT_ERR_MSG_CHK(session, ret, "Failed to clear ingest table \"%s\"",
+          work_item->entry->ingest_uri);
+    }
 
 #ifdef HAVE_DIAGNOSTIC
     WT_ERR(__layered_assert_ingest_table_empty(session, work_item->entry->ingest_uri));

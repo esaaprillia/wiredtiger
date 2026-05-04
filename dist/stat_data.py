@@ -1364,11 +1364,14 @@ conn_dsrc_stats = [
     LayeredStat('layered_curs_update', 'Layered table cursor update operations'),
 
     LayeredStat('layered_drain_ingest_keys_flushed', 'ingest drain: keys copied into stable btree'),
+    LayeredStat('layered_drain_ingest_msec_cursor_next', 'ingest drain: milliseconds spent in ingest version cursor next calls', 'no_scale'),
+    LayeredStat('layered_drain_ingest_msec_lookahead', 'ingest drain: milliseconds spent walking the stable table to pre-warm cache before drain', 'no_scale'),
+    LayeredStat('layered_drain_ingest_msec_move_updates', 'ingest drain: milliseconds spent applying updates into stable btree', 'no_scale'),
+    LayeredStat('layered_drain_ingest_msec_prepare_work', 'ingest drain: milliseconds spent in prepared transaction fix or resolve', 'no_scale'),
+    LayeredStat('layered_drain_ingest_msec_total', 'ingest drain: milliseconds total wall time across ingest drain operations', 'no_scale'),
+    LayeredStat('layered_drain_ingest_msec_truncate', 'ingest drain: milliseconds spent truncating the ingest table after copy', 'no_scale'),
+    LayeredStat('layered_drain_ingest_prefetch_active', 'ingest drain: number of drains that ran with the prefetch cache-warming optimization active'),
     LayeredStat('layered_drain_ingest_updates_chained', 'ingest drain: update values chained from ingest cursor rows'),
-    LayeredStat('layered_drain_ingest_usec_cursor_next', 'ingest drain: microseconds spent in ingest version cursor next calls', 'no_scale'),
-    LayeredStat('layered_drain_ingest_usec_move_updates', 'ingest drain: microseconds spent applying updates into stable btree', 'no_scale'),
-    LayeredStat('layered_drain_ingest_usec_prepare_work', 'ingest drain: microseconds spent in prepared transaction fix or resolve', 'no_scale'),
-    LayeredStat('layered_drain_ingest_usec_total', 'ingest drain: microseconds total wall time across ingest drain operations', 'no_scale'),
     LayeredStat('layered_drain_ingest_version_rows', 'ingest drain: ingest version cursor rows processed'),
 
     LayeredStat('layered_table_manager_checkpoints', 'checkpoints performed on this table by the layered table manager'),

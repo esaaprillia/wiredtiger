@@ -843,9 +843,9 @@ struct __wt_connection_impl {
     wt_shared bool evict_use_npos;
     bool evict_legacy_page_visit_strategy;
 
-#define WT_MAX_PREFETCH_QUEUE 120
-#define WT_PREFETCH_QUEUE_PER_TRIGGER 30
-#define WT_PREFETCH_THREAD_COUNT 8
+#define WT_MAX_PREFETCH_QUEUE 20000
+#define WT_PREFETCH_QUEUE_PER_TRIGGER 100
+#define WT_PREFETCH_THREAD_COUNT 64
     WT_SPINLOCK prefetch_lock;
     WT_THREAD_GROUP prefetch_threads;
     uint64_t prefetch_queue_count;
