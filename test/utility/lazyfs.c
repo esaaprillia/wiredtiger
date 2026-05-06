@@ -36,6 +36,13 @@
 #include <signal.h>
 #endif
 
+#ifndef __GLIBC__
+#include <stdlib.h>
+char *canonicalize_file_name(const char *path) {
+    return realpath(path, NULL);
+}
+#endif
+
 #ifdef __linux__
 #define LAZYFS_PATH "../../../lazyfs/src/lazyfs/lazyfs"
 #endif
