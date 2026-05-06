@@ -25,15 +25,15 @@ namespace {
 // Ensures the given test directory is removed at the beginning of the test.
 class home_directory {
 public:
-    explicit home_directory(std::string_view path) : _path(path)
+    explicit home_directory(const std::string_view path) : _path(path)
     {
         std::filesystem::remove_all(path);
     }
 
-    [[nodiscard]] const char *
+    [[nodiscard]] std::string_view
     path() const
     {
-        return _path.c_str();
+        return _path;
     }
 
 private:
@@ -43,97 +43,92 @@ private:
 class write_conflict_fixture {
 public:
     write_conflict_fixture()
-        : _conn(_home.path(), connection_config), _writer{_conn.create_session()},
-          _reader{_conn.create_session()}
     {
-        REQUIRE(_writer->iface.create(&_writer->iface, uri, table_config) == 0);
-        REQUIRE(_writer->iface.open_cursor(&_writer->iface, uri, nullptr, nullptr, &_cursor) == 0);
+        constexpr auto uri = "layered:write_conflict";
+
+        static constexpr auto config =
+          "key_format=S,value_format=S,block_manager=disagg,type=layered";
+
+        auto &session = _session->iface;
+        REQUIRE(session.create(&session, uri, config) == 0);
+        REQUIRE(session.open_cursor(&session, uri, nullptr, nullptr, &_cursor) == 0);
     }
 
-    void
-    begin_writer()
+    [[nodiscard]] WT_SESSION_IMPL *
+    session() const
     {
-        REQUIRE(_writer->iface.begin_transaction(&_writer->iface, nullptr) == 0);
+        return _session;
     }
 
-    void
-    begin_reader()
+    [[nodiscard]] WT_SESSION_IMPL *
+    create_session()
     {
-        REQUIRE(_reader->iface.begin_transaction(&_reader->iface, nullptr) == 0);
+        return _conn.create_session();
     }
 
-    /* Commits immediately; must be called before begin_reader(). */
-    void
-    add_committed_entry(std::string_view start, std::string_view stop)
+    [[nodiscard]] WT_LAYERED_TABLE *
+    layered_table() const
     {
-        auto *s = _conn.create_session();
-        REQUIRE(s->iface.begin_transaction(&s->iface, nullptr) == 0);
-        insert(s, start, stop);
-        REQUIRE(s->iface.commit_transaction(&s->iface, nullptr) == 0);
-    }
-
-    /* Writer's transaction must be open; reader's snapshot will exclude it. */
-    void
-    add_uncommitted_entry(std::string_view start, std::string_view stop)
-    {
-        insert(_writer, start, stop);
-    }
-
-    /* Reader's transaction must be open; self-visible, no conflict. */
-    void
-    add_own_uncommitted_entry(std::string_view start, std::string_view stop)
-    {
-        insert(_reader, start, stop);
-    }
-
-    int
-    detect_conflict(std::string_view key)
-    {
-        auto key_item = make_item(key);
-        return __wt_layered_table_truncate_detect_write_conflict(
-          _reader, &layered_table(), &key_item);
-    }
-
-    [[nodiscard]] bool
-    lock_is_released()
-    {
-        return truncate_list_helpers::lock_is_released(*_reader, layered_table());
+        auto *layered_cursor = reinterpret_cast<WT_CURSOR_LAYERED *>(_cursor);
+        return reinterpret_cast<WT_LAYERED_TABLE *>(layered_cursor->dhandle);
     }
 
 private:
-    void
-    insert(WT_SESSION_IMPL *session, std::string_view start, std::string_view stop)
-    {
-        auto start_item = make_item(start);
-        auto stop_item = make_item(stop);
-        REQUIRE(
-          __wt_insert_truncate_entry(session, &layered_table(), &start_item, &stop_item) == 0);
-    }
-
-    [[nodiscard]] WT_LAYERED_TABLE &
-    layered_table() const
-    {
-        return *reinterpret_cast<WT_LAYERED_TABLE *>(
-          reinterpret_cast<WT_CURSOR_LAYERED *>(_cursor)->dhandle);
-    }
-
-    static constexpr auto uri = "layered:write_conflict";
-
-    static constexpr auto connection_config =
+    static constexpr auto conn_config =
       "create,"
       "extensions=[./ext/page_log/palite/libwiredtiger_palite.so],"
       "disaggregated=(role=follower,page_log=palite)";
 
-    static constexpr auto table_config =
-      "key_format=S,value_format=S,block_manager=disagg,type=layered";
-
-    home_directory _home{"WT_TEST.truncate_write_conflict"};
     scoped_fast_truncate_enable _enable;
-    connection_wrapper _conn;
-    WT_SESSION_IMPL *_writer;
-    WT_SESSION_IMPL *_reader;
+    home_directory _home{"WT_TEST.truncate_write_conflict"};
+    connection_wrapper _conn{_home.path().data(), conn_config};
+    WT_SESSION_IMPL *_session{_conn.create_session()};
     WT_CURSOR *_cursor{};
 };
+
+template <typename Op>
+int
+do_in_transaction(WT_SESSION_IMPL *s, const Op operation, const bool commit)
+{
+    auto *iface = &s->iface;
+    REQUIRE(iface->begin_transaction(iface, nullptr) == 0);
+
+    const int ret = operation();
+
+    if (commit)
+        REQUIRE(iface->commit_transaction(iface, nullptr) == 0);
+
+    return ret;
+}
+
+template <typename Op>
+int
+do_in_uncommitted_transaction(WT_SESSION_IMPL *session, const Op operation)
+{
+    return do_in_transaction(session, operation, /* commit = */ false);
+}
+
+template <typename Op>
+int
+do_in_committed_transaction(WT_SESSION_IMPL *session, const Op operation)
+{
+    return do_in_transaction(session, operation, /* commit = */ true);
+}
+
+void
+insert_entry(WT_SESSION_IMPL *s, WT_LAYERED_TABLE *t, std::string_view start, std::string_view stop)
+{
+    auto start_item = make_item(start);
+    auto stop_item = make_item(stop);
+    REQUIRE(__wt_insert_truncate_entry(s, t, &start_item, &stop_item) == 0);
+}
+
+int
+detect_conflict(WT_SESSION_IMPL *s, WT_LAYERED_TABLE *t, std::string_view key)
+{
+    auto key_item = make_item(key);
+    return __wt_layered_table_truncate_detect_write_conflict(s, t, &key_item);
+}
 
 } // namespace
 
@@ -142,11 +137,12 @@ SCENARIO("write conflict returns 0 for an empty truncate list", "[truncate_list]
     GIVEN("a layered table with an empty truncate list")
     {
         write_conflict_fixture f;
-        f.begin_reader();
 
         WHEN("the conflict check is called for any key")
         {
-            const auto result = f.detect_conflict("key150");
+            const auto result = do_in_uncommitted_transaction(f.session(), [&] {
+                return detect_conflict(f.session(), f.layered_table(), "key150");
+            });
 
             THEN("it returns 0")
             {
@@ -162,13 +158,17 @@ SCENARIO("write conflict returns 0 when the key is outside all uncommitted range
     GIVEN("one uncommitted truncate range [key100, key200]")
     {
         write_conflict_fixture f;
-        f.begin_writer();
-        f.add_uncommitted_entry("key100", "key200");
-        f.begin_reader();
+        do_in_uncommitted_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key100", "key200");
+            return 0;
+        });
 
         WHEN("the conflict check is called for a key before the range")
         {
-            const auto result = f.detect_conflict("key050");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key050");
+            });
 
             THEN("it returns 0")
             {
@@ -178,7 +178,10 @@ SCENARIO("write conflict returns 0 when the key is outside all uncommitted range
 
         WHEN("the conflict check is called for a key after the range")
         {
-            const auto result = f.detect_conflict("key250");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key250");
+            });
 
             THEN("it returns 0")
             {
@@ -190,14 +193,18 @@ SCENARIO("write conflict returns 0 when the key is outside all uncommitted range
     GIVEN("two non-overlapping uncommitted ranges [key100, key200] and [key400, key500]")
     {
         write_conflict_fixture f;
-        f.begin_writer();
-        f.add_uncommitted_entry("key100", "key200");
-        f.add_uncommitted_entry("key400", "key500");
-        f.begin_reader();
+        do_in_uncommitted_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key100", "key200");
+            insert_entry(f.session(), f.layered_table(), "key400", "key500");
+            return 0;
+        });
 
         WHEN("the conflict check is called for a key between the ranges")
         {
-            const auto result = f.detect_conflict("key300");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key300");
+            });
 
             THEN("it returns 0")
             {
@@ -213,13 +220,17 @@ SCENARIO("write conflict returns WT_ROLLBACK when the key is inside an uncommitt
     GIVEN("one uncommitted truncate range [key100, key200]")
     {
         write_conflict_fixture f;
-        f.begin_writer();
-        f.add_uncommitted_entry("key100", "key200");
-        f.begin_reader();
+        do_in_uncommitted_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key100", "key200");
+            return 0;
+        });
 
         WHEN("the conflict check is called for a key strictly inside the range")
         {
-            const auto result = f.detect_conflict("key150");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key150");
+            });
 
             THEN("it returns WT_ROLLBACK")
             {
@@ -229,7 +240,10 @@ SCENARIO("write conflict returns WT_ROLLBACK when the key is inside an uncommitt
 
         WHEN("the conflict check is called for the start boundary key")
         {
-            const auto result = f.detect_conflict("key100");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key100");
+            });
 
             THEN("it returns WT_ROLLBACK (start boundary is inclusive)")
             {
@@ -239,7 +253,10 @@ SCENARIO("write conflict returns WT_ROLLBACK when the key is inside an uncommitt
 
         WHEN("the conflict check is called for the stop boundary key")
         {
-            const auto result = f.detect_conflict("key200");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key200");
+            });
 
             THEN("it returns WT_ROLLBACK (stop boundary is inclusive)")
             {
@@ -254,13 +271,17 @@ SCENARIO("write conflict with a single-key uncommitted range", "[truncate_list][
     GIVEN("a single-key uncommitted range [key100, key100]")
     {
         write_conflict_fixture f;
-        f.begin_writer();
-        f.add_uncommitted_entry("key100", "key100");
-        f.begin_reader();
+        do_in_uncommitted_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key100", "key100");
+            return 0;
+        });
 
         WHEN("the conflict check is called for the exact key")
         {
-            const auto result = f.detect_conflict("key100");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key100");
+            });
 
             THEN("it returns WT_ROLLBACK")
             {
@@ -270,7 +291,10 @@ SCENARIO("write conflict with a single-key uncommitted range", "[truncate_list][
 
         WHEN("the conflict check is called for a key just before the range")
         {
-            const auto result = f.detect_conflict("key099");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key099");
+            });
 
             THEN("it returns 0")
             {
@@ -280,7 +304,10 @@ SCENARIO("write conflict with a single-key uncommitted range", "[truncate_list][
 
         WHEN("the conflict check is called for a key just after the range")
         {
-            const auto result = f.detect_conflict("key101");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key101");
+            });
 
             THEN("it returns 0")
             {
@@ -290,20 +317,24 @@ SCENARIO("write conflict with a single-key uncommitted range", "[truncate_list][
     }
 }
 
-SCENARIO("write conflict with two non-overlapping uncommitted ranges",
-  "[truncate_list][write_conflict]")
+SCENARIO(
+  "write conflict with two non-overlapping uncommitted ranges", "[truncate_list][write_conflict]")
 {
     GIVEN("uncommitted ranges [key100, key200] and [key400, key500]")
     {
         write_conflict_fixture f;
-        f.begin_writer();
-        f.add_uncommitted_entry("key100", "key200");
-        f.add_uncommitted_entry("key400", "key500");
-        f.begin_reader();
+        do_in_uncommitted_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key100", "key200");
+            insert_entry(f.session(), f.layered_table(), "key400", "key500");
+            return 0;
+        });
 
         WHEN("the conflict check is called for a key in the first range")
         {
-            const auto result = f.detect_conflict("key150");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key150");
+            });
 
             THEN("it returns WT_ROLLBACK")
             {
@@ -313,7 +344,10 @@ SCENARIO("write conflict with two non-overlapping uncommitted ranges",
 
         WHEN("the conflict check is called for a key in the second range")
         {
-            const auto result = f.detect_conflict("key450");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key450");
+            });
 
             THEN("it returns WT_ROLLBACK")
             {
@@ -329,12 +363,17 @@ SCENARIO("write conflict does not trigger for a committed truncate range",
     GIVEN("one committed (globally visible) truncate range [key100, key200]")
     {
         write_conflict_fixture f;
-        f.add_committed_entry("key100", "key200");
-        f.begin_reader();
+        do_in_committed_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key100", "key200");
+            return 0;
+        });
 
         WHEN("the conflict check is called for a key inside the committed range")
         {
-            const auto result = f.detect_conflict("key150");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key150");
+            });
 
             THEN("it returns 0")
             {
@@ -350,12 +389,13 @@ SCENARIO("write conflict does not trigger for the reader's own uncommitted range
     GIVEN("an uncommitted truncate range owned by the current transaction")
     {
         write_conflict_fixture f;
-        f.begin_reader();
-        f.add_own_uncommitted_entry("key100", "key200");
 
         WHEN("the conflict check is called for a key inside that range")
         {
-            const auto result = f.detect_conflict("key150");
+            const auto result = do_in_uncommitted_transaction(f.session(), [&] {
+                insert_entry(f.session(), f.layered_table(), "key100", "key200");
+                return detect_conflict(f.session(), f.layered_table(), "key150");
+            });
 
             THEN("it returns 0 (own uncommitted range is self-visible)")
             {
@@ -371,14 +411,22 @@ SCENARIO("write conflict with overlapping committed and uncommitted ranges",
     GIVEN("a committed range [key100, key300] and an uncommitted range [key200, key400]")
     {
         write_conflict_fixture f;
-        f.add_committed_entry("key100", "key300");
-        f.begin_writer();
-        f.add_uncommitted_entry("key200", "key400");
-        f.begin_reader();
+        auto *session_2 = f.create_session();
+        do_in_committed_transaction(session_2, [&] {
+            insert_entry(session_2, f.layered_table(), "key100", "key300");
+            return 0;
+        });
+        do_in_uncommitted_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key200", "key400");
+            return 0;
+        });
 
         WHEN("the conflict check is called for a key covered only by the committed range")
         {
-            const auto result = f.detect_conflict("key150");
+            auto *session_3 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_3, [&] {
+                return detect_conflict(session_3, f.layered_table(), "key150");
+            });
 
             THEN("it returns 0")
             {
@@ -388,7 +436,10 @@ SCENARIO("write conflict with overlapping committed and uncommitted ranges",
 
         WHEN("the conflict check is called for a key in the overlap region")
         {
-            const auto result = f.detect_conflict("key250");
+            auto *session_3 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_3, [&] {
+                return detect_conflict(session_3, f.layered_table(), "key250");
+            });
 
             THEN("it returns WT_ROLLBACK (uncommitted range covers the key)")
             {
@@ -398,7 +449,10 @@ SCENARIO("write conflict with overlapping committed and uncommitted ranges",
 
         WHEN("the conflict check is called for a key covered only by the uncommitted range")
         {
-            const auto result = f.detect_conflict("key350");
+            auto *session_3 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_3, [&] {
+                return detect_conflict(session_3, f.layered_table(), "key350");
+            });
 
             THEN("it returns WT_ROLLBACK")
             {
@@ -413,27 +467,40 @@ SCENARIO("write conflict read lock is always released", "[truncate_list][write_c
     GIVEN("a layered table with one uncommitted truncate range")
     {
         write_conflict_fixture f;
-        f.begin_writer();
-        f.add_uncommitted_entry("key100", "key200");
-        f.begin_reader();
+        do_in_uncommitted_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key100", "key200");
+            return 0;
+        });
 
         WHEN("the conflict check detects a write conflict")
         {
-            CHECK(f.detect_conflict("key150") == WT_ROLLBACK);
+            auto *session_2 = f.create_session();
+            bool released;
+            do_in_uncommitted_transaction(session_2, [&] {
+                CHECK(detect_conflict(session_2, f.layered_table(), "key150") == WT_ROLLBACK);
+                released = lock_is_released(*session_2, *f.layered_table());
+                return 0;
+            });
 
             THEN("the truncate lock is not held")
             {
-                REQUIRE(f.lock_is_released());
+                REQUIRE(released);
             }
         }
 
         WHEN("the conflict check finds no conflict")
         {
-            CHECK(f.detect_conflict("key050") == 0);
+            auto *session_2 = f.create_session();
+            bool released;
+            do_in_uncommitted_transaction(session_2, [&] {
+                CHECK(detect_conflict(session_2, f.layered_table(), "key050") == 0);
+                released = lock_is_released(*session_2, *f.layered_table());
+                return 0;
+            });
 
             THEN("the truncate lock is not held")
             {
-                REQUIRE(f.lock_is_released());
+                REQUIRE(released);
             }
         }
     }
@@ -441,15 +508,19 @@ SCENARIO("write conflict read lock is always released", "[truncate_list][write_c
     GIVEN("a layered table with an empty truncate list")
     {
         write_conflict_fixture f;
-        f.begin_reader();
 
         WHEN("the conflict check is called")
         {
-            CHECK(f.detect_conflict("key150") == 0);
+            bool released;
+            do_in_uncommitted_transaction(f.session(), [&] {
+                CHECK(detect_conflict(f.session(), f.layered_table(), "key150") == 0);
+                released = lock_is_released(*f.session(), *f.layered_table());
+                return 0;
+            });
 
             THEN("the truncate lock is not held")
             {
-                REQUIRE(f.lock_is_released());
+                REQUIRE(released);
             }
         }
     }
@@ -460,16 +531,21 @@ SCENARIO("write conflict feature flag disabled returns 0", "[truncate_list][writ
     GIVEN("an uncommitted truncate range exists but the feature flag is disabled")
     {
         write_conflict_fixture f;
-        f.begin_writer();
-        f.add_uncommitted_entry("key100", "key200");
-        f.begin_reader();
-        /* Declared after f so it destructs first, restoring the flag before f's connection closes. */
+        do_in_uncommitted_transaction(f.session(), [&] {
+            insert_entry(f.session(), f.layered_table(), "key100", "key200");
+            return 0;
+        });
+        /* Declared after f so it destructs first, restoring the flag before f's connection closes.
+         */
         scoped_fast_truncate_enable flag_restore;
         __wt_process.disagg_fast_truncate_2026 = false;
 
         WHEN("the conflict check is called for a key inside the range")
         {
-            const auto result = f.detect_conflict("key150");
+            auto *session_2 = f.create_session();
+            const auto result = do_in_uncommitted_transaction(session_2, [&] {
+                return detect_conflict(session_2, f.layered_table(), "key150");
+            });
 
             THEN("it returns 0 (feature flag early exit)")
             {
